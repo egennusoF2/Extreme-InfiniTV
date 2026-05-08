@@ -18,6 +18,11 @@ import {
   getRecents,
   getHiddenCategories,
   setCategoryHidden,
+  getAllowedCategories,
+  setCategoryAllowed,
+  setAllowedCategories,
+  getCategoryMode,
+  setCategoryMode,
   getViewSort,
   setViewSort,
   getSeriesProgressSummary,
@@ -58,6 +63,13 @@ const categoryListStatus = document.getElementById(
   "series-category-list-status"
 )
 const categorySearchEl = document.getElementById("series-category-search")
+const categoryModeHideBtn = document.getElementById("series-category-mode-hide")
+const categoryModeSelectBtn = document.getElementById("series-category-mode-select")
+const categorySelectActions = document.getElementById("series-category-select-actions")
+const categoryShowSelectedBtn = document.getElementById("series-category-show-selected")
+const categorySelectAllBtn = document.getElementById("series-category-select-all")
+const categorySelectClearBtn = document.getElementById("series-category-select-clear")
+let showSelectedOnly = false
 
 const searchEl = /** @type {HTMLInputElement|null} */ (
   document.getElementById("series-search")
@@ -91,6 +103,16 @@ function hiddenSet() {
     : new Set()
 }
 
+function allowedSet() {
+  return activePlaylistId
+    ? getAllowedCategories(activePlaylistId, "series")
+    : new Set()
+}
+
+function categoryMode() {
+  return activePlaylistId ? getCategoryMode(activePlaylistId, "series") : "hide"
+}
+
 // STAR_OUTLINE / STAR_FILLED / BOOKMARK_FILLED are imported from entry-card.
 
 document.addEventListener("xt:favorites-changed", (e) => {
@@ -121,6 +143,23 @@ document.addEventListener("xt:hidden-categories-changed", (e) => {
   const detail = /** @type {CustomEvent} */ (e).detail
   if (!detail || detail.playlistId !== activePlaylistId) return
   if (detail.kind !== "series") return
+  renderCategoryPicker(all)
+  applyFilter()
+})
+
+document.addEventListener("xt:allowed-categories-changed", (e) => {
+  const detail = /** @type {CustomEvent} */ (e).detail
+  if (!detail || detail.playlistId !== activePlaylistId) return
+  if (detail.kind !== "series") return
+  renderCategoryPicker(all)
+  applyFilter()
+})
+
+document.addEventListener("xt:category-mode-changed", (e) => {
+  const detail = /** @type {CustomEvent} */ (e).detail
+  if (!detail || detail.playlistId !== activePlaylistId) return
+  if (detail.kind !== "series") return
+  syncCategoryModeToggle()
   renderCategoryPicker(all)
   applyFilter()
 })
@@ -189,9 +228,11 @@ function renderCategoryPicker(items) {
   const names = Array.from(counts.keys()).sort((a, b) =>
     a.localeCompare(b, "en", { sensitivity: "base" })
   )
+  const mode = categoryMode()
   const hidden = hiddenSet()
-  const visibleNames = names.filter((n) => !hidden.has(n))
-  const hiddenNames = names.filter((n) => hidden.has(n))
+  const allowed = allowedSet()
+  const visibleNames = mode === "hide" ? names.filter((n) => !hidden.has(n)) : names
+  const hiddenNames = mode === "hide" ? names.filter((n) => hidden.has(n)) : []
 
   const frag = document.createDocumentFragment()
 
@@ -253,6 +294,35 @@ function renderCategoryPicker(items) {
           }
         }
       })
+    } else if (opts.selectAction) {
+      const checked = !!opts.selectChecked
+      rightAction = document.createElement("button")
+      rightAction.type = "button"
+      rightAction.tabIndex = 0
+      rightAction.setAttribute("role", "checkbox")
+      rightAction.setAttribute("aria-checked", String(checked))
+      rightAction.setAttribute(
+        "aria-label",
+        checked
+          ? `Remove "${label}" from shown categories`
+          : `Show only checked categories - include "${label}"`
+      )
+      rightAction.title = checked ? "Showing this category" : "Show this category"
+      rightAction.className =
+        "category-select-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md " +
+        "border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent " +
+        (checked
+          ? "bg-accent border-accent text-bg"
+          : "border-line text-fg-3 hover:text-fg hover:border-fg-3 focus-visible:border-fg-3")
+      rightAction.innerHTML = checked
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>'
+        : ""
+      rightAction.addEventListener("click", (ev) => {
+        ev.stopPropagation()
+        ev.preventDefault()
+        if (!activePlaylistId) return
+        setCategoryAllowed(activePlaylistId, "series", val, !checked)
+      })
     }
 
     const countEl = document.createElement("span")
@@ -287,8 +357,17 @@ function renderCategoryPicker(items) {
   if (recs.length === 0) recRow.style.display = "none"
 
   addRow("", t("list.allCategories"))
-  for (const name of visibleNames) {
-    addRow(name, name, counts.get(name), "", { hideAction: "hide" })
+  if (mode === "select") {
+    for (const name of visibleNames) {
+      addRow(name, name, counts.get(name), "", {
+        selectAction: true,
+        selectChecked: allowed.has(name),
+      })
+    }
+  } else {
+    for (const name of visibleNames) {
+      addRow(name, name, counts.get(name), "", { hideAction: "hide" })
+    }
   }
 
   if (hiddenNames.length) {
@@ -315,12 +394,25 @@ function renderCategoryPicker(items) {
   }
 
   categoryListEl.innerHTML = ""
-  categoryListEl.appendChild(frag)
   if (categoryListStatus) {
-    const total = visibleNames.length
-    categoryListStatus.textContent = `${total.toLocaleString()} ${total === 1 ? "category" : "categories"}${hiddenNames.length ? ` · ${hiddenNames.length} hidden` : ""}`
+    if (mode === "select") {
+      const totalCats = names.length
+      const pickedCount = names.reduce(
+        (acc, name) => (allowed.has(name) ? acc + 1 : acc),
+        0
+      )
+      categoryListStatus.textContent =
+        pickedCount === 0
+          ? `Tick categories to include - ${totalCats.toLocaleString()} total`
+          : `Showing ${pickedCount.toLocaleString()} of ${totalCats.toLocaleString()} categories`
+    } else {
+      const total = visibleNames.length
+      categoryListStatus.textContent = `${total.toLocaleString()} ${total === 1 ? "category" : "categories"}${hiddenNames.length ? ` · ${hiddenNames.length} hidden` : ""}`
+    }
   }
+  categoryListEl.appendChild(frag)
   highlightActiveInList()
+  filterCategories()
 }
 
 function syncPseudoCategoryRows() {
@@ -345,21 +437,92 @@ function filterCategories() {
   if (!categoryListEl || !categoryListStatus || !categorySearchEl) return
   const qnorm = normalize(categorySearchEl.value || "")
   const tokens = qnorm.length ? qnorm.split(" ") : []
+  const mode = categoryMode()
+  const allowed = mode === "select" ? allowedSet() : null
+  const filterToSelected = mode === "select" && showSelectedOnly
 
   let visibleCount = 0
   let totalCount = 0
 
   for (const btn of categoryListEl.querySelectorAll('button[role="option"]')) {
-    const isAll = btn.dataset.val === ""
-    if (!isAll) totalCount++
-    const label = normalize(btn.dataset.val || btn.textContent || "")
-    const matches = !tokens.length || tokens.every((t) => label.includes(t))
-    btn.style.display = matches ? "" : "none"
-    if (matches && !isAll) visibleCount++
+    const val = btn.dataset.val || ""
+    const isPseudo = val.startsWith("__")
+    const isAllButton = val === ""
+    const isRegularRow = !isAllButton && !isPseudo
+    if (isRegularRow) totalCount++
+    const label = normalize(val || btn.textContent || "")
+    const searchMatches = !tokens.length || tokens.every((t) => label.includes(t))
+    let show = searchMatches
+    if (show && filterToSelected && isRegularRow) {
+      show = !!allowed && allowed.has(val)
+    }
+    btn.style.display = show ? "" : "none"
+    if (show && isRegularRow) visibleCount++
   }
 
-  categoryListStatus.textContent = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} categories`
+  if (mode === "select") {
+    const pickedCount = allowed ? allowed.size : 0
+    categoryListStatus.textContent = filterToSelected
+      ? `${visibleCount.toLocaleString()} of ${pickedCount.toLocaleString()} selected (filtered)`
+      : pickedCount === 0
+        ? `Tick categories to include - ${totalCount.toLocaleString()} total`
+        : `${pickedCount.toLocaleString()} of ${totalCount.toLocaleString()} selected`
+  } else {
+    categoryListStatus.textContent = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} categories`
+  }
 }
+
+function syncCategoryModeToggle() {
+  if (!categoryModeHideBtn || !categoryModeSelectBtn) return
+  const mode = categoryMode()
+  categoryModeHideBtn.setAttribute("aria-checked", String(mode === "hide"))
+  categoryModeSelectBtn.setAttribute("aria-checked", String(mode === "select"))
+  if (categorySelectActions) {
+    if (mode === "select") categorySelectActions.removeAttribute("hidden")
+    else categorySelectActions.setAttribute("hidden", "")
+  }
+  if (mode !== "select" && showSelectedOnly) {
+    showSelectedOnly = false
+    syncShowSelectedToggle()
+  }
+}
+
+function syncShowSelectedToggle() {
+  if (!categoryShowSelectedBtn) return
+  categoryShowSelectedBtn.setAttribute("aria-pressed", String(showSelectedOnly))
+}
+
+const onCategoryModeClick = (event) => {
+  const mode = /** @type {HTMLElement} */ (event.currentTarget)?.dataset?.mode
+  if (!activePlaylistId || (mode !== "hide" && mode !== "select")) return
+  setCategoryMode(activePlaylistId, "series", mode)
+}
+categoryModeHideBtn?.addEventListener("click", onCategoryModeClick)
+categoryModeSelectBtn?.addEventListener("click", onCategoryModeClick)
+
+categoryShowSelectedBtn?.addEventListener("click", () => {
+  showSelectedOnly = !showSelectedOnly
+  syncShowSelectedToggle()
+  filterCategories()
+})
+
+categorySelectAllBtn?.addEventListener("click", () => {
+  if (!activePlaylistId || !categoryListEl) return
+  const allowed = new Set(allowedSet())
+  for (const btn of categoryListEl.querySelectorAll('button[role="option"]')) {
+    const val = /** @type {HTMLElement} */ (btn).dataset?.val
+    if (!val) continue
+    if (val.startsWith("__")) continue
+    if (/** @type {HTMLElement} */ (btn).style.display === "none") continue
+    allowed.add(val)
+  }
+  setAllowedCategories(activePlaylistId, "series", allowed)
+})
+
+categorySelectClearBtn?.addEventListener("click", () => {
+  if (!activePlaylistId) return
+  setAllowedCategories(activePlaylistId, "series", [])
+})
 
 categorySearchEl?.addEventListener("input", debounce(filterCategories, 120))
 
@@ -716,11 +879,19 @@ function applyFilter() {
       if (s) out.push(s)
     }
   } else {
+    const mode = categoryMode()
+    const hidden = mode === "hide" ? hiddenSet() : null
+    const allowed = mode === "select" ? allowedSet() : null
+    const allowlistActive = mode === "select" && allowed.size > 0
     out = all.filter((s) => {
       if (activeCat && (s.category || "") !== activeCat) return false
       const cat = (s.category || "").toString()
-      if (cat && hiddenSet().has(cat)) return false
-      return true
+      if (mode === "hide") {
+        if (cat && hidden.has(cat)) return false
+        return true
+      }
+      if (!allowlistActive) return true
+      return cat ? allowed.has(cat) : false
     })
   }
 
@@ -817,6 +988,7 @@ function paintSeries(data, fromCache, age) {
       t("series.totalSeries", { count: all.length.toLocaleString() }) +
       (fromCache ? ` · ${fmtAge(age)}` : "")
   }
+  syncCategoryModeToggle()
   renderCategoryPicker(all)
   applyFilter()
 }
