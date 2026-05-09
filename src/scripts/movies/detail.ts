@@ -45,6 +45,10 @@ import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { fmtImdbRating } from "@/scripts/lib/format.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
 import { t, initI18n } from "@/scripts/lib/i18n.js"
+import { mountPlayer } from "@/scripts/lib/player-runtime.ts"
+import { getPlayerBackend } from "@/scripts/lib/app-settings.js"
+import { toast } from "@/scripts/lib/toast.js"
+import { setupExternalPlayerButton, surfaceLaunchError } from "@/scripts/lib/external-player-button.ts"
 
 const VOD_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -160,6 +164,7 @@ function applyVodInfo(data) {
 
   detailSrc = src
   applyDownloadState()
+  externalBtnHandle?.refresh()
 
   const year = movieData.releasedate || movieData.year || info.year || ""
   const duration =
@@ -283,36 +288,24 @@ function setupPipButton(player) {
   pipBtn.addEventListener("click", () => togglePip(player))
 }
 
-async function ensurePlayer() {
+async function ensureEmbeddedPlayer(backend) {
   if (vjs) return vjs
-  const [{ default: videojs }] = await Promise.all([
-    import("video.js"),
-    import("video.js/dist/video-js.css"),
-  ])
+  const videoEl = document.getElementById("movie-player")
+  if (!videoEl) return null
   const hasNativePipBridge = !!window.AndroidPip
-  vjs = videojs("movie-player", {
+  const mounted = await mountPlayer(videoEl, backend, {
     liveui: false,
     fluid: true,
     preload: "auto",
     autoplay: false,
     aspectRatio: "16:9",
-    controlBar: {
-      volumePanel: { inline: false },
-      pictureInPictureToggle: !hasNativePipBridge,
-      playbackRateMenuButton: true,
-      subsCapsButton: true,
-      audioTrackButton: true,
-      fullscreenToggle: true,
-    },
-    html5: {
-      vhs: {
-        overrideNative: true,
-        limitRenditionByPlayerDimensions: true,
-        smoothQualityChange: true,
-      },
-    },
+    pictureInPictureToggle: !hasNativePipBridge,
   })
-  attachPlayerFocusKeeper(vjs)
+  if (mounted.kind !== "embedded") return null
+  vjs = mounted.handle
+  if (mounted.backend === "videojs") {
+    attachPlayerFocusKeeper(vjs)
+  }
   return vjs
 }
 
@@ -336,34 +329,54 @@ async function startPlayback() {
 
   if (await tryAndroidIntentPlayback(detailSrc)) return
 
+  const localSrc = await getLocalPlayableSrc(detailSrc)
+  const playSrc = localSrc || detailSrc
+  const saved = activePlaylistId
+    ? getProgress(activePlaylistId, "vod", movie.id)
+    : null
+  const resumePos =
+    saved && !saved.completed && saved.position > RESUME_MIN_SECONDS
+      ? (() => {
+          const dur = saved.duration || 0
+          if (dur === 0) return saved.position
+          return saved.position / dur < RESUME_MAX_FRACTION ? saved.position : 0
+        })()
+      : 0
+
+  const backend = getPlayerBackend()
+
+  if (backend === "mpv" || backend === "vlc") {
+    try {
+      await launchExternalPlayback(backend, playSrc, resumePos)
+    } catch (err) {
+      surfaceLaunchError(err, backend)
+    }
+    return
+  }
+
   if (posterEl) posterEl.classList.add("hidden")
   if (playerWrap) playerWrap.classList.remove("hidden")
   const videoEl = document.getElementById("movie-player")
   videoEl?.removeAttribute("hidden")
 
-  const player = await ensurePlayer()
+  const player = await ensureEmbeddedPlayer(backend)
+  if (!player) return
   setupPipButton(player)
-  const localSrc = await getLocalPlayableSrc(detailSrc)
-  const playSrc = localSrc || detailSrc
   const mime = chooseMime(detailSrc)
   player.one("error", () => {
     const e = player.error()
-    log.error("[xt:movie-detail] video.js error", {
+    log.error("[xt:movie-detail] player error", {
       code: e?.code,
       message: e?.message,
       src: playSrc,
     })
   })
 
-  const saved = activePlaylistId
-    ? getProgress(activePlaylistId, "vod", movie.id)
-    : null
-  if (saved && !saved.completed && saved.position > RESUME_MIN_SECONDS) {
+  if (resumePos > 0) {
     player.one("loadedmetadata", () => {
-      const dur = player.duration() || saved.duration || 0
-      const pos = saved.position
-      if (dur === 0 || pos / dur < RESUME_MAX_FRACTION) {
-        try { player.currentTime(pos) } catch {}
+      const dur = player.duration?.() || saved?.duration || 0
+      if (dur === 0 || resumePos / dur < RESUME_MAX_FRACTION) {
+        try { player.currentTime?.(resumePos) } catch {}
       }
     })
   }
@@ -377,8 +390,8 @@ async function startPlayback() {
       if (!activePlaylistId || !movie) return
       const now = Date.now()
       if (now - lastWriteAt < PROGRESS_WRITE_INTERVAL_MS) return
-      const pos = player.currentTime() || 0
-      const dur = player.duration() || 0
+      const pos = player.currentTime?.() || 0
+      const dur = player.duration?.() || 0
       if (pos < 1) return
       lastWriteAt = now
       setProgress(activePlaylistId, "vod", movie.id, pos, dur, {
@@ -388,14 +401,17 @@ async function startPlayback() {
     })
     player.on("ended", () => {
       if (!activePlaylistId || !movie) return
-      const dur = player.duration() || 0
+      const dur = player.duration?.() || 0
       markCompleted(activePlaylistId, "vod", movie.id, { duration: dur })
     })
   }
 
-  player.play().catch((err) =>
-    log.warn("[xt:movie-detail] play() rejected:", err?.message || err)
-  )
+  const playResult = player.play?.()
+  if (playResult && typeof playResult.catch === "function") {
+    playResult.catch((err) =>
+      log.warn("[xt:movie-detail] play() rejected:", err?.message || err)
+    )
+  }
 
   if (activePlaylistId && movie) {
     setRichPresence({
@@ -411,6 +427,17 @@ async function startPlayback() {
   }
 }
 
+async function launchExternalPlayback(backend, src, resumeSeconds) {
+  const { getExternalLauncher } = await import("@/scripts/lib/player-runtime.ts")
+  const launcher = getExternalLauncher(backend)
+  toast({
+    title: t("settings.playback.launching", { player: backend.toUpperCase() })
+      || `Launching ${backend.toUpperCase()}…`,
+    duration: 2000,
+  })
+  await launcher.launch(src, { resumeSeconds })
+}
+
 playBtn?.addEventListener("click", startPlayback)
 
 restartBtn?.addEventListener("click", () => {
@@ -418,6 +445,25 @@ restartBtn?.addEventListener("click", () => {
   clearProgress(activePlaylistId, "vod", movie.id)
   startPlayback()
 })
+
+const externalBtnHandle = setupExternalPlayerButton(
+  /** @type {HTMLButtonElement|null} */ (document.getElementById("movie-detail-open-external")),
+  {
+    getSrc() {
+      return detailSrc || null
+    },
+    getResumeSeconds() {
+      if (!activePlaylistId || !movie) return 0
+      const saved = getProgress(activePlaylistId, "vod", movie.id)
+      if (!saved || saved.completed) return 0
+      return saved.position > RESUME_MIN_SECONDS ? saved.position : 0
+    },
+    beforeLaunch() {
+      // Pause Video.js (or HTML5) so we don't double up on audio.
+      try { vjs?.pause?.() } catch {}
+    },
+  }
+)
 
 document.addEventListener("xt:progress-changed", (e) => {
   const detail = e.detail
@@ -663,6 +709,7 @@ async function boot() {
   if (dl?.url) {
     detailSrc = dl.url
     applyDownloadState()
+    externalBtnHandle?.refresh()
   }
 
   // Per-item cache: paint immediately if available so offline opens work.

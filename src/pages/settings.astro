@@ -30,10 +30,12 @@ import {
   IconInfoCircle,
   IconSparkles,
   IconBolt,
+  IconPlayerPlay,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
 import FavoritesReorder from "@/components/FavoritesReorder.svelte"
+import PlayerPicker from "@/components/PlayerPicker.svelte"
 ---
 
 <Layout pageTitle="Settings">
@@ -312,6 +314,22 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             id="ua-msg"
             aria-live="polite"
             class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+        </article>
+
+        <!-- Playback: in-app player + external launcher (desktop only) -->
+        <article id="playback-section" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 hidden">
+          <div class="flex items-start gap-3">
+            <span class="icon-mark">
+              <IconPlayerPlay aria-hidden="true" stroke={2} />
+            </span>
+            <div class="flex flex-col gap-1 min-w-0">
+              <h3 data-i18n="settings.playback.title" class="text-base font-semibold">Playback</h3>
+              <p data-i18n="settings.playback.helper" class="text-xs text-fg-3">
+                Choose how streams open. External players play 4K and HDR more reliably.
+              </p>
+            </div>
+          </div>
+          <PlayerPicker client:load />
         </article>
 
         <!-- Discord Rich Presence -->
@@ -675,7 +693,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
           <div class="flex flex-col gap-1 min-w-0">
             <h3 data-i18n="settings.help.title" class="text-base font-semibold">Found a bug or have a suggestion?</h3>
             <p data-i18n="settings.help.intro" class="text-sm text-fg-2">
-              Bug reports and feature requests go to GitHub - search existing issues first, or open a new one. For general feedback, email works too.
+              Bug reports, feature requests, questions, and general feedback all go to GitHub - search existing issues first, or pick a template and open a new one.
             </p>
           </div>
         </div>
@@ -690,10 +708,13 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.help.reportIssue">Report a bug</span>
           </a>
           <a
-            href="mailto:support@infinitel8p.com?subject=Extreme%20InfiniTV%20feedback"
+            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-external
             class="btn justify-start sm:justify-center">
             <IconMail aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.help.emailFeedback">Email feedback</span>
+            <span data-i18n="settings.help.sendFeedback">Send feedback</span>
           </a>
         </div>
       </article>
@@ -2245,6 +2266,21 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
 
     if (discordSection && discordRpcSupported) {
       discordSection.classList.remove("hidden")
+    }
+
+    // -------------------------------------------------------------------
+    // Playback (desktop-only): reveal the section if external launches are
+    // possible. The PlayerPicker component renders nothing on web/Android,
+    // so we only show the article wrapper there to avoid an empty card.
+    // -------------------------------------------------------------------
+    {
+      const playbackSection = document.getElementById("playback-section")
+      const externalAvailable =
+        !!(window.__TAURI_INTERNALS__ || window.__TAURI__) &&
+        !/Android/i.test(navigator.userAgent || "")
+      if (playbackSection && externalAvailable) {
+        playbackSection.classList.remove("hidden")
+      }
     }
     if (discordClientIdInput) {
       discordClientIdInput.value = getDiscordClientId()

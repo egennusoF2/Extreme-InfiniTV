@@ -1,6 +1,9 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod discord;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod external_player;
+
 #[cfg(target_os = "android")]
 mod android_diagnostics {
     use std::sync::Once;
@@ -46,10 +49,12 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(discord::RpcState::default())
+        .manage(external_player::ExternalPlayerState::default())
         .invoke_handler(tauri::generate_handler![
             discord::discord_set_activity,
             discord::discord_clear,
             discord::discord_disconnect,
+            external_player::launch_external_player,
         ]);
 
     #[cfg(target_os = "android")]

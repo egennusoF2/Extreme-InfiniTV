@@ -107,13 +107,17 @@ export function getProviderStats() {
 export async function providerFetch(url, init = {}) {
   const ua = getUserAgent()
   const u = String(url).slice(0, 200)
+  const forceTauri = !!init.forceTauri
 
   const callerSignal = init.signal
   const callInit = callerSignal
     ? init
     : { ...init, signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS) }
+  if ("forceTauri" in callInit) delete callInit.forceTauri
 
-  if (!ua || !isTauri) {
+  const useTauri = isTauri && (ua || forceTauri)
+
+  if (!useTauri) {
     log.log(`[xt:net] native start`, u)
     try {
       const r = await nativeFetch(url, callInit, u, callerSignal)
@@ -138,9 +142,16 @@ export async function providerFetch(url, init = {}) {
     }
   }
 
-  log.log(`[xt:net] tauri start ua=${ua}`, u)
+  log.log(`[xt:net] tauri start ua=${ua || "(default)"}`, u)
   const headers = new Headers(callInit.headers || {})
-  headers.set("User-Agent", ua)
+  if (ua) {
+    headers.set("User-Agent", ua)
+  } else if (forceTauri) {
+    headers.set(
+      "User-Agent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+  }
   try {
     const r = await tauriFetch(url, { ...callInit, headers })
     log.log(`[xt:net] tauri ok ${r.status}`, u)

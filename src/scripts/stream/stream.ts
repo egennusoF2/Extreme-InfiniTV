@@ -28,7 +28,6 @@ import {
   getCategoryMode,
   setCategoryMode,
 } from "@/scripts/lib/preferences.js"
-import { toast } from "@/scripts/lib/toast.js"
 import { ICON_X } from "@/scripts/lib/icons.js"
 import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { attachPlayerFocusKeeper } from "@/scripts/lib/player-focus-keeper.js"
@@ -36,7 +35,22 @@ import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { parseM3U as parseSharedM3U } from "@/scripts/lib/m3u-parser.ts"
 import { applyStreamHeaders } from "@/scripts/lib/stream-headers.ts"
 import { renderProviderError } from "@/scripts/lib/provider-error.js"
-import { toastError } from "@/scripts/lib/toast.js"
+import { toast, toastError } from "@/scripts/lib/toast.js"
+import {
+  mountPlayer,
+  externalPlayersAvailable,
+  getExternalLauncher,
+} from "@/scripts/lib/player-runtime.ts"
+import {
+  getPlayerBackend,
+  getUserAgent,
+} from "@/scripts/lib/app-settings.js"
+import {
+  setupExternalPlayerButton,
+  surfaceLaunchError,
+  type ExternalPlayerButtonHandle,
+} from "@/scripts/lib/external-player-button.js"
+import { ICON_EXTERNAL_LINK } from "@/scripts/lib/icons.js"
 import {
   loadProgrammes,
   getProgrammesSync,
@@ -1588,38 +1602,34 @@ async function runAutoDiagnostic(ctx, dismissGenericToast) {
   }
 }
 
-const ensurePlayer = async () => {
+const ensureEmbeddedPlayer = async (backend) => {
   if (vjs) return vjs
-  const [{ default: videojs }] = await Promise.all([
-    import("video.js"),
-    import("video.js/dist/video-js.css"),
-  ])
+  const videoEl = document.getElementById("player")
+  if (!videoEl) return null
   // Hide Video.js's built-in PiP toggle on Tauri Android - the WebView
   // doesn't expose Web PiP so the button always renders disabled. Native
   // PiP goes through the in-page button + AndroidPip bridge instead.
   const hasNativePipBridge = !!window.AndroidPip
-  vjs = videojs("player", {
+  const mounted = await mountPlayer(videoEl, backend, {
     liveui: true,
     fluid: true,
     preload: "auto",
     autoplay: false,
     aspectRatio: "16:9",
+    pictureInPictureToggle: !hasNativePipBridge,
     controlBar: {
       volumePanel: { inline: false },
       pictureInPictureToggle: !hasNativePipBridge,
       playbackRateMenuButton: false,
       fullscreenToggle: true,
     },
-    html5: {
-      vhs: {
-        overrideNative: true,
-        limitRenditionByPlayerDimensions: true,
-        smoothQualityChange: true,
-      },
-    },
   })
+  if (mounted.kind !== "embedded") return null
+  vjs = mounted.handle
 
-  attachPlayerFocusKeeper(vjs)
+  if (mounted.backend === "videojs") {
+    attachPlayerFocusKeeper(vjs)
+  }
 
   vjs.on("playing", () => {
     hideTuningOverlay()
@@ -1848,6 +1858,8 @@ async function play(streamId, name) {
     btn.addEventListener("click", () => { if (vjs) togglePip(vjs) })
     currentEl.appendChild(btn)
 
+    appendExternalLaunchButton(currentEl, streamId, src, name)
+
     if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
     showTuningOverlay(channelLogo)
     runScanLineSweep()
@@ -1862,16 +1874,39 @@ async function play(streamId, name) {
     swapState()
   }
 
+  const backend = getPlayerBackend()
+  const channelHeaders = streamHeadersById.get(streamId) || null
+
+  if (backend === "mpv" || backend === "vlc") {
+    try {
+      await launchExternalLive(backend, src, channelHeaders)
+      showExternalPlayerEmptyState(backend, name)
+    } catch (err) {
+      surfaceLaunchError(err, backend)
+    }
+    if (hasDirectUrl(streamId)) {
+      if (epgList) epgList.innerHTML = `<div class="text-fg-3">No EPG available for M3U source.</div>`
+    } else {
+      loadEPG(streamId)
+    }
+    return
+  }
+
+  resetEmptyState()
   document.getElementById("player")?.removeAttribute("hidden")
-  const player = await ensurePlayer()
-  await applyStreamHeaders(streamHeadersById.get(streamId) || null)
+  const player = await ensureEmbeddedPlayer(backend)
+  if (!player) return
+  await applyStreamHeaders(channelHeaders)
   const seq = ++playSeq
   lastPlayContext = { streamId, name, src, seq, retried: false }
   hideBufferingChip()
   clearStallSentinel()
   try { player.reset?.() } catch {}
   player.src({ src, type: "application/x-mpegURL" })
-  player.play().catch(() => {})
+  const playResult = player.play?.()
+  if (playResult && typeof playResult.catch === "function") {
+    playResult.catch(() => {})
+  }
 
   pushDiscordPresence(channel || { id: streamId, name }, "live")
 
@@ -1880,6 +1915,108 @@ async function play(streamId, name) {
   } else {
     loadEPG(streamId)
   }
+}
+
+let liveExternalBtnHandle: ExternalPlayerButtonHandle | null = null
+
+function appendExternalLaunchButton(parent, streamId, src, name) {
+  liveExternalBtnHandle?.dispose()
+  liveExternalBtnHandle = null
+
+  if (!parent || !externalPlayersAvailable) return
+
+  const btn = document.createElement("button")
+  btn.id = "external-launch-btn"
+  btn.type = "button"
+  btn.hidden = true
+  btn.className =
+    "shrink-0 inline-flex items-center justify-center gap-2 min-h-11 px-3.5 rounded-xl border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
+
+  const iconSpan = document.createElement("span")
+  iconSpan.className = "shrink-0 inline-flex text-xl leading-none"
+  iconSpan.setAttribute("aria-hidden", "true")
+  iconSpan.innerHTML = ICON_EXTERNAL_LINK
+
+  const labelSpan = document.createElement("span")
+  labelSpan.dataset.label = ""
+
+  btn.append(iconSpan, labelSpan)
+  parent.appendChild(btn)
+
+  liveExternalBtnHandle = setupExternalPlayerButton(btn, {
+    getSrc: () => src,
+    getHeaders: () => {
+      const channelHeaders = streamHeadersById.get(streamId) || null
+      return {
+        userAgent: channelHeaders?.userAgent || getUserAgent() || null,
+        referer: channelHeaders?.referer || null,
+      }
+    },
+    beforeLaunch: () => {
+      try { vjs?.pause?.() } catch {}
+    },
+  })
+}
+
+function showExternalPlayerEmptyState(backend, channelName) {
+  const empty = document.getElementById("player-empty")
+  if (!empty) return
+  const eyebrow = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
+  const title = empty.querySelector("[data-i18n='livetv.pickChannel'], [data-empty-title]") as HTMLElement | null
+  const helper = empty.querySelector("[data-i18n='livetv.pickChannelHelper'], [data-empty-helper]") as HTMLElement | null
+  if (eyebrow) {
+    eyebrow.textContent = backend.toUpperCase()
+    eyebrow.removeAttribute("data-i18n")
+  }
+  if (title) {
+    title.textContent = `Now playing in ${backend.toUpperCase()}`
+    title.removeAttribute("data-i18n")
+    title.dataset.emptyTitle = "external"
+  }
+  if (helper) {
+    helper.textContent = channelName || ""
+    helper.removeAttribute("data-i18n")
+    helper.dataset.emptyHelper = "external"
+  }
+}
+
+function resetEmptyState() {
+  const empty = document.getElementById("player-empty")
+  if (!empty) return
+  const eyebrow = empty.querySelector("span[data-empty-eyebrow], span:not([data-i18n])") as HTMLElement | null
+  const title = empty.querySelector("[data-empty-title]") as HTMLElement | null
+  const helper = empty.querySelector("[data-empty-helper]") as HTMLElement | null
+  if (title) {
+    title.setAttribute("data-i18n", "livetv.pickChannel")
+    title.textContent = t("livetv.pickChannel") || "Pick a channel."
+    delete title.dataset.emptyTitle
+  }
+  if (helper) {
+    helper.setAttribute("data-i18n", "livetv.pickChannelHelper")
+    helper.textContent = t("livetv.pickChannelHelper") || "Choose from the list, or change category."
+    delete helper.dataset.emptyHelper
+  }
+  // Eyebrow may still hold the backend name from a previous external launch.
+  const eyebrowI18n = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
+  if (eyebrowI18n) {
+    eyebrowI18n.textContent = t("livetv.idle") || "Idle"
+  } else if (eyebrow) {
+    eyebrow.setAttribute("data-i18n", "livetv.idle")
+    eyebrow.textContent = t("livetv.idle") || "Idle"
+  }
+}
+
+async function launchExternalLive(backend, src, channelHeaders) {
+  const { getExternalLauncher } = await import("@/scripts/lib/player-runtime.ts")
+  const launcher = getExternalLauncher(backend)
+  const ua = channelHeaders?.userAgent || getUserAgent() || null
+  const referer = channelHeaders?.referer || null
+  toast({
+    title: t("settings.playback.launching", { player: backend.toUpperCase() })
+      || `Launching ${backend.toUpperCase()}…`,
+    duration: 2000,
+  })
+  await launcher.launch(src, { userAgent: ua, referer })
 }
 
 // ----------------------------

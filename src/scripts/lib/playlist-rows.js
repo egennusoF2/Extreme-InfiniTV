@@ -5,7 +5,6 @@ import {
   ICON_PENCIL,
   ICON_CHECK,
   ICON_INFO,
-  ICON_CHEVRON_DOWN,
 } from "./icons.js"
 import { escapeHtml, fmtAge } from "./format.js"
 import { t } from "./i18n.js"
@@ -116,10 +115,8 @@ export function renderPlaylistRow({
   info.setAttribute("aria-expanded", "false")
   info.setAttribute("aria-controls", panel.id)
   info.className =
-    "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-fg hover:bg-surface focus:text-fg focus:bg-surface min-h-10 inline-flex items-center justify-center gap-0.5 transition-colors outline-none aria-expanded:text-fg"
-  info.innerHTML =
-    `<span class="inline-flex text-base">${ICON_INFO}</span>` +
-    `<span class="inline-flex text-2xs transition-transform aria-expanded:rotate-180">${ICON_CHEVRON_DOWN}</span>`
+    "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-fg hover:bg-surface focus:text-fg focus:bg-surface min-h-10 inline-flex items-center justify-center transition-colors outline-none aria-expanded:text-fg"
+  info.innerHTML = `<span class="inline-flex text-base">${ICON_INFO}</span>`
   info.addEventListener("click", async (ev) => {
     ev.stopPropagation()
     const expanded = info.getAttribute("aria-expanded") === "true"
@@ -130,32 +127,39 @@ export function renderPlaylistRow({
     }
     panel.classList.remove("hidden")
     info.setAttribute("aria-expanded", "true")
-    paintPlaylistHealthInto(panel, entry)
+    paintPlaylistHealthInto(panel, entry, {
+      isCompact,
+      onAfterRemove,
+    })
   })
 
-  const edit = document.createElement("a")
-  edit.href = `/login?edit=${encodeURIComponent(entry._id)}`
-  edit.title = "Edit"
-  edit.setAttribute("aria-label", t("playlist.editAria", { title: entry.title }))
-  edit.className =
-    "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-fg hover:bg-surface focus:text-fg focus:bg-surface min-h-10 inline-flex items-center justify-center transition-colors outline-none"
-  edit.innerHTML = `<span class="inline-flex text-base">${ICON_PENCIL}</span>`
+  if (!isCompact) {
+    const edit = document.createElement("a")
+    edit.href = `/login?edit=${encodeURIComponent(entry._id)}`
+    edit.title = "Edit"
+    edit.setAttribute("aria-label", t("playlist.editAria", { title: entry.title }))
+    edit.className =
+      "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-fg hover:bg-surface focus:text-fg focus:bg-surface min-h-10 inline-flex items-center justify-center transition-colors outline-none"
+    edit.innerHTML = `<span class="inline-flex text-base">${ICON_PENCIL}</span>`
 
-  const del = document.createElement("button")
-  del.type = "button"
-  del.title = "Remove"
-  del.setAttribute("aria-label", t("playlist.removeAria", { title: entry.title }))
-  del.className =
-    "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-bad hover:bg-bad/10 focus:text-bad focus:bg-bad/10 min-h-10 inline-flex items-center justify-center transition-colors outline-none"
-  del.innerHTML = `<span class="inline-flex text-base">${ICON_TRASH}</span>`
-  del.addEventListener("click", async (ev) => {
-    ev.stopPropagation()
-    if (!confirm(t("playlist.removeConfirm", { title: entry.title }))) return
-    await removeEntry(entry._id)
-    if (onAfterRemove) await onAfterRemove()
-  })
+    const del = document.createElement("button")
+    del.type = "button"
+    del.title = "Remove"
+    del.setAttribute("aria-label", t("playlist.removeAria", { title: entry.title }))
+    del.className =
+      "shrink-0 rounded-md px-1.5 py-2 text-fg-3 hover:text-bad hover:bg-bad/10 focus:text-bad focus:bg-bad/10 min-h-10 inline-flex items-center justify-center transition-colors outline-none"
+    del.innerHTML = `<span class="inline-flex text-base">${ICON_TRASH}</span>`
+    del.addEventListener("click", async (ev) => {
+      ev.stopPropagation()
+      if (!confirm(t("playlist.removeConfirm", { title: entry.title }))) return
+      await removeEntry(entry._id)
+      if (onAfterRemove) await onAfterRemove()
+    })
+    row.append(pick, info, edit, del)
+  } else {
+    row.append(pick, info)
+  }
 
-  row.append(pick, info, edit, del)
   outer.append(row, panel)
   return outer
 }
@@ -205,9 +209,15 @@ function healthRow(label, value, tone) {
 /**
  * Render the eight-row health snapshot for `entry` into `panel`. Replaces
  * the panel's children. Wires a Refresh button that re-runs ensureUserInfo
- * and repaints.
+ * and repaints. In compact mode (sidebar switcher) also surfaces Edit +
+ * Delete buttons here, since the row no longer renders them inline.
+ *
+ * @param {HTMLElement} panel
+ * @param {any} entry
+ * @param {{ isCompact?: boolean, onAfterRemove?: () => void | Promise<void> }} [opts]
  */
-function paintPlaylistHealthInto(panel, entry) {
+function paintPlaylistHealthInto(panel, entry, opts = {}) {
+  const { isCompact = false, onAfterRemove } = opts
   const h = getPlaylistHealth(entry._id)
 
   const accountTone =
@@ -332,7 +342,7 @@ function paintPlaylistHealthInto(panel, entry) {
   refresh.type = "button"
   refresh.textContent = t("settings.health.refresh")
   refresh.className =
-    "mt-3 inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-2.5 py-1 text-2xs text-fg-2 hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
+    "inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-2.5 py-1 text-2xs text-fg-2 hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
   refresh.addEventListener("click", async (ev) => {
     ev.stopPropagation()
     refresh.setAttribute("disabled", "")
@@ -346,8 +356,46 @@ function paintPlaylistHealthInto(panel, entry) {
     } catch {}
     refresh.removeAttribute("disabled")
     refresh.classList.remove("opacity-60")
-    paintPlaylistHealthInto(panel, entry)
+    paintPlaylistHealthInto(panel, entry, opts)
   })
 
-  panel.replaceChildren(list, refresh)
+  const footer = document.createElement("div")
+  footer.className = "mt-3 flex items-center justify-between gap-2 flex-wrap"
+  footer.appendChild(refresh)
+
+  if (isCompact) {
+    const actions = document.createElement("div")
+    actions.className = "inline-flex items-center gap-1"
+
+    const edit = document.createElement("a")
+    edit.href = `/login?edit=${encodeURIComponent(entry._id)}`
+    edit.title = t("playlist.editAria", { title: entry.title })
+    edit.setAttribute("aria-label", t("playlist.editAria", { title: entry.title }))
+    edit.className =
+      "inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-2.5 py-1 text-2xs text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
+    edit.innerHTML =
+      `<span class="inline-flex text-sm">${ICON_PENCIL}</span>` +
+      `<span>${escapeHtml(t("playlist.edit") || "Edit")}</span>`
+
+    const del = document.createElement("button")
+    del.type = "button"
+    del.title = t("playlist.removeAria", { title: entry.title })
+    del.setAttribute("aria-label", t("playlist.removeAria", { title: entry.title }))
+    del.className =
+      "inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-2.5 py-1 text-2xs text-fg-2 hover:bg-bad/10 hover:text-bad hover:border-bad/40 focus-visible:bg-bad/10 focus-visible:text-bad focus-visible:border-bad/40 transition-colors"
+    del.innerHTML =
+      `<span class="inline-flex text-sm">${ICON_TRASH}</span>` +
+      `<span>${escapeHtml(t("playlist.remove") || "Remove")}</span>`
+    del.addEventListener("click", async (ev) => {
+      ev.stopPropagation()
+      if (!confirm(t("playlist.removeConfirm", { title: entry.title }))) return
+      await removeEntry(entry._id)
+      if (onAfterRemove) await onAfterRemove()
+    })
+
+    actions.append(edit, del)
+    footer.appendChild(actions)
+  }
+
+  panel.replaceChildren(list, footer)
 }

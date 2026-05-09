@@ -5,7 +5,8 @@
 //     no upload)
 //   - preferences (favorites, recents, progress, hidden categories, view
 //     sorts, favorites order)
-//   - app settings (UA preset, download dir, concurrency)
+//   - app settings (UA preset, download dir, concurrency, player backend
+//     + per-kind path / extra args / reuse-window flag)
 
 import { getState as getCredsState, restoreState as restoreCredsState } from "@/scripts/lib/creds.js"
 import {
@@ -20,6 +21,16 @@ import {
   setDownloadDir,
   getDownloadConcurrency,
   setDownloadConcurrency,
+  getPlayerBackend,
+  setPlayerBackend,
+  getPlayerPath,
+  setPlayerPath,
+  getPlayerExtraArgs,
+  setPlayerExtraArgs,
+  getPlayerReuseInstance,
+  setPlayerReuseInstance,
+  PLAYER_BACKENDS,
+  EXTERNAL_PLAYER_BACKENDS,
 } from "@/scripts/lib/app-settings.js"
 
 const FORMAT_VERSION = 1
@@ -57,6 +68,19 @@ export async function exportAll() {
       userAgent: getUserAgent(),
       downloadDir: getDownloadDir(),
       downloadConcurrency: getDownloadConcurrency(),
+      playerBackend: getPlayerBackend(),
+      playerPaths: {
+        mpv: getPlayerPath("mpv"),
+        vlc: getPlayerPath("vlc"),
+      },
+      playerExtraArgs: {
+        mpv: getPlayerExtraArgs("mpv"),
+        vlc: getPlayerExtraArgs("vlc"),
+      },
+      playerReuse: {
+        mpv: getPlayerReuseInstance("mpv"),
+        vlc: getPlayerReuseInstance("vlc"),
+      },
     },
   }
 }
@@ -114,6 +138,43 @@ export async function importAll(blob) {
     if (typeof b.appSettings.downloadConcurrency === "number") {
       setDownloadConcurrency(b.appSettings.downloadConcurrency)
       summary.appSettings++
+    }
+    if (
+      typeof b.appSettings.playerBackend === "string" &&
+      PLAYER_BACKENDS.includes(b.appSettings.playerBackend)
+    ) {
+      setPlayerBackend(b.appSettings.playerBackend)
+      summary.appSettings++
+    }
+    if (b.appSettings.playerPaths && typeof b.appSettings.playerPaths === "object") {
+      for (const kind of EXTERNAL_PLAYER_BACKENDS) {
+        const candidate = b.appSettings.playerPaths[kind]
+        if (
+          typeof candidate === "string" &&
+          (candidate === "" || isAcceptablePath(candidate))
+        ) {
+          setPlayerPath(kind, candidate)
+          summary.appSettings++
+        }
+      }
+    }
+    if (b.appSettings.playerExtraArgs && typeof b.appSettings.playerExtraArgs === "object") {
+      for (const kind of EXTERNAL_PLAYER_BACKENDS) {
+        const args = b.appSettings.playerExtraArgs[kind]
+        if (Array.isArray(args) && args.every((line) => typeof line === "string")) {
+          setPlayerExtraArgs(kind, args)
+          summary.appSettings++
+        }
+      }
+    }
+    if (b.appSettings.playerReuse && typeof b.appSettings.playerReuse === "object") {
+      for (const kind of EXTERNAL_PLAYER_BACKENDS) {
+        const reuse = b.appSettings.playerReuse[kind]
+        if (typeof reuse === "boolean") {
+          setPlayerReuseInstance(kind, reuse)
+          summary.appSettings++
+        }
+      }
     }
   }
 
