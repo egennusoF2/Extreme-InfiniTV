@@ -174,6 +174,52 @@ export async function convertSrc(uri) {
 }
 
 /**
+ * Open the system file picker and read the picked file as UTF-8 text.
+ * @returns {Promise<{text: string, name: string} | null>} null if the user
+ *          cancelled or the plugin isn't available.
+ */
+export async function pickJsonFile() {
+  const m = await mod()
+  if (!m) return null
+  const uris = await m.AndroidFs.showOpenFilePicker({
+    mimeTypes: [
+      "application/json",
+      "text/json",
+      "text/plain",
+      "application/octet-stream",
+      "*/*",
+    ],
+    multiple: false,
+  })
+  const uri = Array.isArray(uris) ? uris[0] : null
+  if (!uri) return null
+  let name = ""
+  try {
+    name = (await m.AndroidFs.getName(uri)) || ""
+  } catch {}
+  const text = await m.AndroidFs.readTextFile(uri)
+  return { text, name }
+}
+
+/**
+ * Open the system "Save As" picker and write `text` (UTF-8) to the chosen destination.
+ * @returns true if the file was written, false if the user cancelled or
+ *          the plugin isn't available.
+ */
+export async function saveJsonFile(defaultFileName, text) {
+  const m = await mod()
+  if (!m) return false
+  const uri = await m.AndroidFs.showSaveFilePicker(
+    defaultFileName,
+    "application/json"
+  )
+  if (!uri) return false
+  const bytes = new TextEncoder().encode(text)
+  await m.AndroidFs.writeFile(uri, bytes)
+  return true
+}
+
+/**
  * Hand the URI off to Android's system "Open with..." chooser via
  * Intent.ACTION_VIEW. The user picks VLC / MX Player / native gallery / etc.
  * In-WebView local-file playback is broken on Android in current Tauri 2

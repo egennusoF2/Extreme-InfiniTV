@@ -59,7 +59,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
          landscape-phone:sticky landscape-phone:top-0
          landscape-phone:h-dvh landscape-phone:overflow-y-auto
          custom-scroll
-         landscape-phone:[scrollbar-width:none]
+         landscape-phone:scrollbar-none
          landscape-phone:[&::-webkit-scrollbar]:hidden">
 
   <a
@@ -67,7 +67,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     aria-label="Extreme InfiniTV - Home"
     data-i18n-attr="aria-label:sidebar.brandHome"
     class="brand-mark group [view-transition-name:brand-mark]
-           flex items-center gap-3 px-2 py-2
+           hidden lg:flex items-center gap-3 px-2 py-2
            justify-center lg:justify-start outline-none">
     <svg
       xmlns="http://www.w3.org/2000/svg"

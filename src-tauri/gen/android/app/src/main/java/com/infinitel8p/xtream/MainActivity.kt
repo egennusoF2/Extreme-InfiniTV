@@ -211,7 +211,7 @@ class MainActivity : TauriActivity() {
       }
     }
 
-    webView.webChromeClient = object : WebChromeClient() {
+    webView.webChromeClient = object : RustWebChromeClient(this) {
       override fun onShowCustomView(view: View, callback: CustomViewCallback) {
         if (fullscreenView != null) {
           callback.onCustomViewHidden()
