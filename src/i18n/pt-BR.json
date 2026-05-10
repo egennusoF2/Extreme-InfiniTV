@@ -601,6 +601,8 @@
   "streamTest.reachable": "A transmissão está acessível.",
   "streamTest.warn": "Acessível, com observações.",
   "streamTest.unreachable": "A transmissão não está acessível.",
+  "streamTest.info": "Não testável",
+  "streamTest.summary.nonHttp": "Streams {scheme}:// não podem ser testados pelo navegador. Reproduza no MPV ou VLC para verificar.",
   "streamTest.stage.endpoint": "Endpoint",
   "streamTest.stage.playlist": "Lista HLS",
   "streamTest.stage.firstSegment": "Primeiro segmento",

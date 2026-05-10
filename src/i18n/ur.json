@@ -601,6 +601,8 @@
   "streamTest.reachable": "اسٹریم تک پہنچا جا سکتا ہے۔",
   "streamTest.warn": "پہنچا جا سکتا ہے، تنبیہات کے ساتھ۔",
   "streamTest.unreachable": "اسٹریم تک نہیں پہنچا جا سکتا۔",
+  "streamTest.info": "ٹیسٹ نہیں ہو سکتا",
+  "streamTest.summary.nonHttp": "{scheme}:// اسٹریمز کا براؤزر سے معائنہ ممکن نہیں۔ تصدیق کے لیے MPV یا VLC میں چلائیں۔",
   "streamTest.stage.endpoint": "اینڈ پوائنٹ",
   "streamTest.stage.playlist": "HLS پلے لسٹ",
   "streamTest.stage.firstSegment": "پہلا سیگمنٹ",

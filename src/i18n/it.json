@@ -601,6 +601,8 @@
   "streamTest.reachable": "Lo stream è raggiungibile.",
   "streamTest.warn": "Raggiungibile, con avvertimenti.",
   "streamTest.unreachable": "Lo stream non è raggiungibile.",
+  "streamTest.info": "Non testabile",
+  "streamTest.summary.nonHttp": "I flussi {scheme}:// non possono essere sondati dal browser. Riproduci in MPV o VLC per verificare.",
   "streamTest.stage.endpoint": "Endpoint",
   "streamTest.stage.playlist": "Playlist HLS",
   "streamTest.stage.firstSegment": "Primo segmento",

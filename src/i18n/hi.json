@@ -601,6 +601,8 @@
   "streamTest.reachable": "स्ट्रीम तक पहुँच योग्य।",
   "streamTest.warn": "पहुँच योग्य, चेतावनियों के साथ।",
   "streamTest.unreachable": "स्ट्रीम तक नहीं पहुँचा जा सकता।",
+  "streamTest.info": "परीक्षण योग्य नहीं",
+  "streamTest.summary.nonHttp": "{scheme}:// स्ट्रीम को ब्राउज़र से जाँचा नहीं जा सकता। सत्यापन के लिए MPV या VLC में चलाएँ।",
   "streamTest.stage.endpoint": "एंडपॉइंट",
   "streamTest.stage.playlist": "HLS प्लेलिस्ट",
   "streamTest.stage.firstSegment": "पहला सेगमेंट",

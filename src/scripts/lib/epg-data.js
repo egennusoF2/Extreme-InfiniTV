@@ -324,14 +324,14 @@ function writeEpgHttpMeta(playlistId, meta) {
   } catch {}
 }
 
+/** @returns {string} EPG URL, or "" when this playlist has no EPG source. */
 function buildEpgUrl(creds, playlistId) {
   if (isLikelyM3USource(creds.host, creds.user, creds.pass)) {
-    let url = ""
     try {
-      url = localStorage.getItem(`xt_m3u_epg:${playlistId}`) || ""
-    } catch {}
-    if (!url) throw new Error("This M3U playlist has no x-tvg-url EPG.")
-    return url
+      return localStorage.getItem(`xt_m3u_epg:${playlistId}`) || ""
+    } catch {
+      return ""
+    }
   }
   const base = fmtBase(creds.host, creds.port).replace(/\/+$/, "")
   return (
@@ -365,6 +365,7 @@ async function readResponseAsXml(url, response) {
  */
 async function fetchEpgConditional(creds, playlistId) {
   const url = buildEpgUrl(creds, playlistId)
+  if (!url) return { notModified: false, xml: "", noSource: true }
   const meta = readEpgHttpMeta(playlistId)
   const headers = {}
   if (meta?.lastModified) headers["If-Modified-Since"] = meta.lastModified
@@ -411,6 +412,7 @@ export async function loadProgrammes(playlistId, creds, opts = {}) {
       const result = await retryWithBackoff(() =>
         fetchEpgConditional(creds, playlistId)
       )
+      if (result.noSource) return null // M3U with no x-tvg-url; nothing to load.
       let programmes
       if (result.notModified) {
         await cacheHydrate(playlistId, EPG_CACHE_KIND)

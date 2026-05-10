@@ -601,6 +601,8 @@
   "streamTest.reachable": "Le flux est accessible.",
   "streamTest.warn": "Accessible, avec des réserves.",
   "streamTest.unreachable": "Le flux n'est pas accessible.",
+  "streamTest.info": "Non testable",
+  "streamTest.summary.nonHttp": "Les flux {scheme}:// ne peuvent pas être sondés depuis le navigateur. Lisez dans MPV ou VLC pour vérifier.",
   "streamTest.stage.endpoint": "Point de terminaison",
   "streamTest.stage.playlist": "Liste HLS",
   "streamTest.stage.firstSegment": "Premier segment",

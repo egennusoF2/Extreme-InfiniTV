@@ -601,6 +601,8 @@
   "streamTest.reachable": "Streaming dapat dijangkau.",
   "streamTest.warn": "Dapat dijangkau, dengan peringatan.",
   "streamTest.unreachable": "Streaming tidak dapat dijangkau.",
+  "streamTest.info": "Tidak dapat diuji",
+  "streamTest.summary.nonHttp": "Stream {scheme}:// tidak bisa diuji dari browser. Putar di MPV atau VLC untuk memverifikasi.",
   "streamTest.stage.endpoint": "Endpoint",
   "streamTest.stage.playlist": "Playlist HLS",
   "streamTest.stage.firstSegment": "Segmen pertama",

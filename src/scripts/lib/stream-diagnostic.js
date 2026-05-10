@@ -159,6 +159,7 @@ export async function diagnoseStream(url, onUpdate) {
     head: null,
     playlist: null,
     firstSegment: null,
+    nonHttp: false,
     error: "",
   }
 
@@ -169,6 +170,15 @@ export async function diagnoseStream(url, onUpdate) {
   }
 
   emit()
+
+  // Non-HTTP schemes (rtsp/rtmp/udp/mms/...) can't be probed from a WebView
+  if (!/^https?:\/\//i.test(url)) {
+    report.nonHttp = true
+    report.scheme = (url.split("://")[0] || "").toLowerCase()
+    report.finishedAt = Date.now()
+    emit()
+    return report
+  }
 
   report.head = await headOrGet(url)
   emit()
@@ -271,6 +281,14 @@ import { t } from "@/scripts/lib/i18n.js"
 
 export function summarizeReport(report) {
   if (!report) return { verdict: "unknown", reason: "" }
+  if (report.nonHttp) {
+    return {
+      verdict: "info",
+      reason:
+        t("streamTest.summary.nonHttp", { scheme: report.scheme || "" }) ||
+        `Can't test ${report.scheme}:// from the browser. Play it in MPV or VLC to verify.`,
+    }
+  }
   const head = report.head
   if (!head?.ok) {
     return {

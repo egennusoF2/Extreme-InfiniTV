@@ -601,6 +601,8 @@
   "streamTest.reachable": "ストリームに到達可能です。",
   "streamTest.warn": "到達可能ですが注意点があります。",
   "streamTest.unreachable": "ストリームに到達できません。",
+  "streamTest.info": "テスト不可",
+  "streamTest.summary.nonHttp": "{scheme}:// ストリームはブラウザから検査できません。MPV または VLC で再生して確認してください。",
   "streamTest.stage.endpoint": "エンドポイント",
   "streamTest.stage.playlist": "HLS プレイリスト",
   "streamTest.stage.firstSegment": "最初のセグメント",

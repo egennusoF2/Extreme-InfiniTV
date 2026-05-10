@@ -601,6 +601,8 @@
   "streamTest.reachable": "Yayına ulaşılabiliyor.",
   "streamTest.warn": "Ulaşılabiliyor, ancak uyarılar var.",
   "streamTest.unreachable": "Yayına ulaşılamıyor.",
+  "streamTest.info": "Test edilemez",
+  "streamTest.summary.nonHttp": "{scheme}:// akışları tarayıcıdan kontrol edilemez. Doğrulamak için MPV veya VLC'de oynatın.",
   "streamTest.stage.endpoint": "Uç nokta",
   "streamTest.stage.playlist": "HLS oynatma listesi",
   "streamTest.stage.firstSegment": "İlk segment",

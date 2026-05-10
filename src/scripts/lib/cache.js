@@ -213,12 +213,17 @@ export function setCached(entryId, kind, data, ttlMs) {
  * Cache-or-fetch primitive. Hydrates from IDB first, returns cached value
  * if fresh, otherwise runs the fetcher and persists.
  *
+ * In-flight calls are deduped per (entryId, kind, force) so a Sidebar warmup
+ * racing with a page-bundle loader doesn't fire two parallel network requests
+ * for the same playlist.
+ *
  * @param {string} entryId
  * @param {string} kind
  * @param {number} ttlMs
  * @param {() => Promise<any>} fetcher
  * @param {{ force?: boolean }} [opts]
  */
+const _inflightFetch = new Map()
 export async function cachedFetch(entryId, kind, ttlMs, fetcher, opts = {}) {
   if (!opts.force) {
     await hydrate(entryId, kind)
@@ -231,9 +236,20 @@ export async function cachedFetch(entryId, kind, ttlMs, fetcher, opts = {}) {
       return { data: hit.data, fromCache: true, age: hit.age, stale: true }
     }
   }
-  const data = await fetcher()
-  setCached(entryId, kind, data, ttlMs)
-  return { data, fromCache: false, age: 0, stale: false }
+  const inflightKey = makeKey(entryId, kind) + (opts.force ? ":force" : "")
+  const existing = _inflightFetch.get(inflightKey)
+  if (existing) return existing
+  const run = (async () => {
+    try {
+      const data = await fetcher()
+      setCached(entryId, kind, data, ttlMs)
+      return { data, fromCache: false, age: 0, stale: false }
+    } finally {
+      _inflightFetch.delete(inflightKey)
+    }
+  })()
+  _inflightFetch.set(inflightKey, run)
+  return run
 }
 
 const _revalidating = new Map()

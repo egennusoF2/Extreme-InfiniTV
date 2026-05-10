@@ -601,6 +601,8 @@
   "streamTest.reachable": "Поток доступен.",
   "streamTest.warn": "Доступен, с замечаниями.",
   "streamTest.unreachable": "Поток недоступен.",
+  "streamTest.info": "Невозможно проверить",
+  "streamTest.summary.nonHttp": "Потоки {scheme}:// нельзя проверить из браузера. Воспроизведите в MPV или VLC для подтверждения.",
   "streamTest.stage.endpoint": "Конечная точка",
   "streamTest.stage.playlist": "HLS-плейлист",
   "streamTest.stage.firstSegment": "Первый сегмент",

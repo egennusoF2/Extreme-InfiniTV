@@ -601,6 +601,8 @@
   "streamTest.reachable": "Stream is bereikbaar.",
   "streamTest.warn": "Bereikbaar, met kanttekeningen.",
   "streamTest.unreachable": "Stream is niet bereikbaar.",
+  "streamTest.info": "Niet testbaar",
+  "streamTest.summary.nonHttp": "{scheme}://-streams kunnen niet via de browser worden getest. Speel af in MPV of VLC om te verifiëren.",
   "streamTest.stage.endpoint": "Eindpunt",
   "streamTest.stage.playlist": "HLS-afspeellijst",
   "streamTest.stage.firstSegment": "Eerste segment",

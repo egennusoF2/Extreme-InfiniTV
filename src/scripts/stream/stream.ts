@@ -45,7 +45,9 @@ import {
 } from "@/scripts/lib/player-runtime.ts"
 import {
   getPlayerBackend,
+  getPlayerPath,
   getUserAgent,
+  EXTERNAL_PLAYER_BACKENDS,
 } from "@/scripts/lib/app-settings.js"
 import {
   setupExternalPlayerButton,
@@ -176,6 +178,7 @@ try {
 
 let activePlaylistId = ""
 let activePlaylistTitle = ""
+let activeTuningTransition: any = null
 
 document.addEventListener("xt:active-changed", () => {
   clearRichPresence().catch(() => {})
@@ -1814,11 +1817,53 @@ function pushDiscordPresence(channel, kind) {
   })
 }
 
+function pickConfiguredExternal() {
+  for (const kind of EXTERNAL_PLAYER_BACKENDS) {
+    if (getPlayerPath(kind)) return kind
+  }
+  return null
+}
+
 async function play(streamId, name) {
   if (!currentEl) return
   const src = hasDirectUrl(streamId)
     ? getDirectUrl(streamId)
     : buildDirectM3U8(streamId)
+
+  // Embedded players (Video.js + hls.js) only speak http(s). M3U sources can
+  // ship rtsp/rtmp/udp/mms/... - those need MPV/VLC
+  const isHttpSrc = /^https?:\/\//i.test(src || "")
+  if (!isHttpSrc && src) {
+    const selectedBackend = getPlayerBackend()
+    const backendIsExternal =
+      selectedBackend === "mpv" || selectedBackend === "vlc"
+    if (!backendIsExternal) {
+      const externalKind =
+        externalPlayersAvailable ? pickConfiguredExternal() : null
+      const channelHeaders = streamHeadersById.get(streamId) || null
+      if (externalKind) {
+        try {
+          await launchExternalLive(externalKind, src, channelHeaders)
+          showExternalPlayerEmptyState(externalKind, name)
+        } catch (err) {
+          surfaceLaunchError(err, externalKind)
+        }
+        if (activePlaylistId) {
+          const channel = all.find((channel) => channel.id === streamId)
+          pushRecent(activePlaylistId, "live", streamId, name, channel?.logo || null)
+        }
+        setNowPlaying(streamId)
+        return
+      }
+      const scheme = (src.split("://")[0] || "").toLowerCase()
+      toastError(
+        t("stream.error.schemeUnsupported", { scheme }) ||
+          `Can't play "${scheme}://" streams in the embedded player. Set up MPV or VLC in Settings → Playback.`
+      )
+      return
+    }
+    // backend is mpv/vlc - fall through to the existing external launch below.
+  }
 
   if (activePlaylistId) {
     const ch = all.find((c) => c.id === streamId)
@@ -1833,8 +1878,17 @@ async function play(streamId, name) {
   )
   const supportsVT = typeof document.startViewTransition === "function"
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  if (supportsVT && !reduceMotion && sourceLogo instanceof HTMLElement) {
-    sourceLogo.style.viewTransitionName = "tuning-logo"
+  const wantTransition =
+    supportsVT && !reduceMotion && !activeTuningTransition && sourceLogo instanceof HTMLElement
+  if (wantTransition) {
+    for (const stale of document.querySelectorAll<HTMLElement>(
+      '[style*="view-transition-name"]'
+    )) {
+      if (stale !== sourceLogo && stale.style.viewTransitionName === "tuning-logo") {
+        stale.style.viewTransitionName = ""
+      }
+    }
+    sourceLogo!.style.viewTransitionName = "tuning-logo"
   }
 
   const swapState = () => {
@@ -1872,11 +1926,16 @@ async function play(streamId, name) {
     runScanLineSweep()
   }
 
-  if (supportsVT && !reduceMotion) {
+  if (wantTransition) {
     const transition = document.startViewTransition(() => swapState())
-    transition.finished.finally(() => {
-      if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
-    })
+    activeTuningTransition = transition
+    transition.ready?.catch?.(() => {})
+    transition.finished
+      .catch(() => {})
+      .finally(() => {
+        if (activeTuningTransition === transition) activeTuningTransition = null
+        if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
+      })
   } else {
     swapState()
   }
@@ -2017,12 +2076,16 @@ async function launchExternalLive(backend, src, channelHeaders) {
   const launcher = getExternalLauncher(backend)
   const ua = channelHeaders?.userAgent || getUserAgent() || null
   const referer = channelHeaders?.referer || null
+  log.log(`[xt:livetv] external launch backend=${backend} url=${src}`)
   toast({
     title: t("settings.playback.launching", { player: backend.toUpperCase() })
       || `Launching ${backend.toUpperCase()}…`,
     duration: 2000,
   })
-  await launcher.launch(src, { userAgent: ua, referer })
+  const result = await launcher.launch(src, { userAgent: ua, referer })
+  log.log(
+    `[xt:livetv] external launch result backend=${backend} pid=${result?.pid} reused=${result?.reused}`
+  )
 }
 
 // ----------------------------

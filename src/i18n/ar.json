@@ -601,6 +601,8 @@
   "streamTest.reachable": "البث متاح.",
   "streamTest.warn": "متاح، مع تحفظات.",
   "streamTest.unreachable": "البث غير متاح.",
+  "streamTest.info": "غير قابل للاختبار",
+  "streamTest.summary.nonHttp": "لا يمكن فحص بثوث {scheme}:// من المتصفح. شغّلها في MPV أو VLC للتحقّق.",
   "streamTest.stage.endpoint": "نقطة النهاية",
   "streamTest.stage.playlist": "قائمة HLS",
   "streamTest.stage.firstSegment": "أول مقطع",

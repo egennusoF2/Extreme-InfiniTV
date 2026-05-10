@@ -601,6 +601,8 @@
   "streamTest.reachable": "流媒体可访问。",
   "streamTest.warn": "可访问，但有警告。",
   "streamTest.unreachable": "流媒体不可访问。",
+  "streamTest.info": "无法测试",
+  "streamTest.summary.nonHttp": "{scheme}:// 流无法从浏览器中检测。请在 MPV 或 VLC 中播放以验证。",
   "streamTest.stage.endpoint": "端点",
   "streamTest.stage.playlist": "HLS 播放列表",
   "streamTest.stage.firstSegment": "首个分段",
