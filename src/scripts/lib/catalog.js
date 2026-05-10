@@ -5,6 +5,8 @@ import {
   loadCreds,
   buildApiUrl,
   isLikelyM3USource,
+  isLocalM3UHost,
+  readLocalM3UContent,
 } from "@/scripts/lib/creds.js"
 import { normalize } from "@/scripts/lib/text.js"
 import { providerFetch, streamingText } from "@/scripts/lib/provider-fetch.js"
@@ -99,9 +101,15 @@ export async function ensureLive(creds, playlistId, opts = {}) {
   const onBytes = makeBytesEmitter(playlistId, "live")
   const { data } = await cachedFetch(playlistId, kind, CHANNELS_TTL_MS, () => retryWithBackoff(async () => {
     if (isM3U) {
-      const r = await providerFetch(creds.host)
-      if (!r.ok) throw new HttpRetryError(r.status, `M3U ${r.status}`)
-      const text = await streamingText(r, onBytes)
+      let text
+      if (isLocalM3UHost(creds.host)) {
+        text = await readLocalM3UContent(creds.host)
+        try { onBytes(text.length, text.length) } catch {}
+      } else {
+        const r = await providerFetch(creds.host)
+        if (!r.ok) throw new HttpRetryError(r.status, `M3U ${r.status}`)
+        text = await streamingText(r, onBytes)
+      }
       return m3uToChannelList(text).sort((a, b) =>
         a.name.localeCompare(b.name, "en", { sensitivity: "base" })
       )

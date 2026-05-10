@@ -57,11 +57,16 @@ export function renderPlaylistRow({
     ? ""
     : entry.type === "xtream"
     ? `${entry.serverUrl} · ${entry.username}`
+    : entry.type === "local-m3u"
+    ? entry.sourceName || ""
     : entry.url || ""
 
   const badgeSize = isCompact
     ? "h-5 min-w-10 px-1.5"
     : "h-6 min-w-12 px-2 tracking-wide"
+
+  const badgeLabel =
+    entry.type === "xtream" ? "XT" : entry.type === "local-m3u" ? "FILE" : "M3U"
 
   const pick = document.createElement("button")
   pick.type = "button"
@@ -74,7 +79,7 @@ export function renderPlaylistRow({
       entry.type === "xtream"
         ? "ring-accent/40 text-accent bg-accent-soft"
         : "ring-line text-fg-2 bg-surface-2"
-    }">${entry.type === "xtream" ? "XT" : "M3U"}</span>
+    }">${badgeLabel}</span>
     <span class="flex flex-col min-w-0 flex-1 ${isCompact ? "" : "gap-0.5"}">
       <span class="truncate text-sm ${
         isActive ? "text-fg font-medium" : "text-fg-2"

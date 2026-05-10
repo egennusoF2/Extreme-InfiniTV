@@ -4,12 +4,14 @@
 //   { entries: PlaylistEntry[], selectedId: string }
 //
 // PlaylistEntry =
-//   | { _id, title, type: "xtream", serverUrl, username, password, addedAt, lastUsedAt? }
-//   | { _id, title, type: "m3u",    url,                                 addedAt, lastUsedAt? }
+//   | { _id, title, type: "xtream",    serverUrl, username, password,  addedAt, lastUsedAt? }
+//   | { _id, title, type: "m3u",       url,                            addedAt, lastUsedAt? }
+//   | { _id, title, type: "local-m3u", sourceName, epgUrl?,            addedAt, lastUsedAt? }
 //
 // Tauri builds persist via @tauri-apps/plugin-store; web/SSR via localStorage
 // + cookies. Old "xt_host" / "xt_port" / "xt_user" / "xt_pass" keys are
 // auto-migrated into one entry on first read.
+
 import { log } from "@/scripts/lib/log.js"
 import { Store } from "@tauri-apps/plugin-store"
 
@@ -21,6 +23,7 @@ const STORAGE_KEY = "xt_playlists"
 const LEGACY_KEYS = ["host", "port", "user", "pass"]
 const EVT_ACTIVE_CHANGED = "xt:active-changed"
 const EVT_ENTRIES_UPDATED = "xt:entries-updated"
+export const LOCAL_M3U_SCHEME = "xt-local://"
 
 let storePromise = null
 function getStore() {
@@ -223,16 +226,28 @@ export async function addEntry(partial) {
     addedAt: Date.now(),
     ...partial,
   }
+  let pendingLocalContent = null
   if (entry.type === "xtream") {
     entry.serverUrl = (entry.serverUrl || "").replace(/\/+$/, "")
   } else if (entry.type === "m3u") {
     entry.url = entry.url || ""
+  } else if (entry.type === "local-m3u") {
+    pendingLocalContent = typeof entry.content === "string" ? entry.content : ""
+    delete entry.content // never lives on the main entries blob
+    entry.sourceName = entry.sourceName || ""
+    entry.epgUrl = entry.epgUrl || ""
   }
   if (!entry.title) {
     entry.title =
       entry.type === "xtream"
         ? hostnameFrom(entry.serverUrl) || "Untitled"
+        : entry.type === "local-m3u"
+        ? entry.sourceName || "Local playlist"
         : hostnameFrom(entry.url) || "Untitled"
+  }
+  if (pendingLocalContent !== null) {
+    const { setLocalContent } = await import("./local-content.js")
+    await setLocalContent(entry._id, pendingLocalContent)
   }
   const next = {
     entries: [...s.entries, entry],
@@ -256,6 +271,7 @@ export async function selectEntry(id) {
 
 export async function removeEntry(id) {
   const s = await getState()
+  const removed = s.entries.find((e) => e._id === id)
   const remaining = s.entries.filter((e) => e._id !== id)
   let selectedId = s.selectedId
   if (selectedId === id) selectedId = remaining[0]?._id || ""
@@ -264,13 +280,36 @@ export async function removeEntry(id) {
   invalidateEntry(id)
   const { clearForPlaylist } = await import("./preferences.js")
   clearForPlaylist(id)
+  if (removed?.type === "local-m3u") {
+    const { deleteLocalContent } = await import("./local-content.js")
+    deleteLocalContent(id).catch(() => {})
+  }
   dispatch(EVT_ENTRIES_UPDATED)
   dispatch(EVT_ACTIVE_CHANGED, await getActiveEntry())
 }
 
 export async function updateEntry(id, patch) {
   const s = await getState()
-  const next = s.entries.map((e) => (e._id === id ? { ...e, ...patch } : e))
+  const existing = s.entries.find((e) => e._id === id)
+  const isLocal = patch?.type === "local-m3u" || existing?.type === "local-m3u"
+  const incoming = { ...patch }
+  let pendingLocalContent = null
+  if (isLocal) {
+    if (typeof incoming.content === "string") {
+      pendingLocalContent = incoming.content
+    }
+    delete incoming.content
+  }
+  const next = s.entries.map((e) => {
+    if (e._id !== id) return e
+    const merged = { ...e, ...incoming }
+    if (isLocal) delete merged.content // keep entries blob small
+    return merged
+  })
+  if (pendingLocalContent !== null) {
+    const { setLocalContent } = await import("./local-content.js")
+    await setLocalContent(id, pendingLocalContent)
+  }
   await writeRaw({ ...s, entries: next })
   const { invalidateEntry } = await import("./cache.js")
   invalidateEntry(id)
@@ -333,6 +372,9 @@ export async function loadCreds() {
   if (e.type === "m3u") {
     return { host: e.url || "", port: "", user: "", pass: "" }
   }
+  if (e.type === "local-m3u") {
+    return { host: LOCAL_M3U_SCHEME + e._id, port: "", user: "", pass: "" }
+  }
   return {
     host: e.serverUrl || "",
     port: "",
@@ -378,6 +420,7 @@ export function buildApiUrl(creds, action, params = {}) {
 }
 
 export function isLikelyM3USource(host, user, pass) {
+  if (typeof host === "string" && host.startsWith(LOCAL_M3U_SCHEME)) return true
   try {
     const url = new URL(host)
     const ext = (url.pathname || "").toLowerCase()
@@ -386,6 +429,37 @@ export function isLikelyM3USource(host, user, pass) {
   } catch {
     return false
   }
+}
+
+/** Returns true when the host string is the local-file sentinel. */
+export function isLocalM3UHost(host) {
+  return typeof host === "string" && host.startsWith(LOCAL_M3U_SCHEME)
+}
+
+/**
+ * Read the stored M3U text for a local-m3u entry. `host` is the
+ * `xt-local://<id>` sentinel returned by loadCreds(). Returns the empty
+ * string if the entry has gone missing.
+ *
+ * Falls back to a `content` field on the entry itself for backward
+ * compatibility with the first version of the feature, which embedded the
+ * text on the entry. On hit, that content is migrated into IDB and stripped
+ * from the entry so subsequent reads are fast and the entries blob shrinks.
+ */
+export async function readLocalM3UContent(host) {
+  if (!isLocalM3UHost(host)) return ""
+  const id = host.slice(LOCAL_M3U_SCHEME.length)
+  const { getLocalContent, setLocalContent } = await import("./local-content.js")
+  const fromIdb = await getLocalContent(id)
+  if (fromIdb) return fromIdb
+  const entries = await getEntries()
+  const entry = entries.find((e) => e._id === id && e.type === "local-m3u")
+  const legacy = typeof entry?.content === "string" ? entry.content : ""
+  if (legacy) {
+    await setLocalContent(id, legacy)
+    updateEntry(id, { content: undefined }).catch(() => {})
+  }
+  return legacy
 }
 
 function hostnameFrom(u) {

@@ -34,7 +34,7 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		<div
 			role="tablist"
 			aria-label="Playlist type" data-i18n-attr="aria-label:aria.playlistType"
-			class="grid grid-cols-2 gap-1 p-1 rounded-xl border border-line bg-surface mb-10 max-w-md">
+			class="grid grid-cols-3 gap-1 p-1 rounded-xl border border-line bg-surface mb-10 max-w-2xl">
 			<button
 				id="tab-xtream"
 				type="button"
@@ -61,6 +61,20 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					data-i18n="login.tab.url.sub"
 					class="mt-0.5 text-label font-medium uppercase tracking-wider opacity-70">
 					M3U / M3U8
+				</span>
+			</button>
+			<button
+				id="tab-local"
+				type="button"
+				role="tab"
+				class="flex flex-col items-center justify-center text-center px-3 py-2 rounded-lg min-h-12 transition-colors disabled:cursor-not-allowed disabled:opacity-40">
+				<span data-i18n="login.tab.local" class="text-sm font-medium leading-tight">
+					I have a playlist file
+				</span>
+				<span
+					data-i18n="login.tab.local.sub"
+					class="mt-0.5 text-label font-medium uppercase tracking-wider opacity-70">
+					.m3u / .m3u8
 				</span>
 			</button>
 		</div>
@@ -157,6 +171,40 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 				</label>
 			</div>
 
+			<!-- Local-file fields -->
+			<div id="local-fields" class="hidden flex-col gap-6">
+				<label class="flex flex-col gap-2">
+					<span
+						data-i18n="login.field.localFile"
+						class="text-xs font-semibold tracking-wider uppercase text-fg-3">
+						Playlist file
+					</span>
+					<div class="flex flex-wrap items-center gap-3">
+						<button
+							id="localPickBtn"
+							type="button"
+							data-i18n="login.action.pickFile"
+							class="btn">
+							Choose file…
+						</button>
+						<span
+							id="localFileName"
+							class="truncate text-sm text-fg-3 font-mono min-w-0"
+							data-i18n="login.field.localFile.none"
+							>No file selected.</span>
+					</div>
+					<span data-i18n="login.field.localFile.helper" class="text-xs text-fg-3 leading-relaxed">
+						Pick a .m3u or .m3u8 file from your device. The contents are stored with this playlist so you can keep watching without re-picking the file.
+					</span>
+					<input
+						id="localFileInput"
+						type="file"
+						accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl"
+						class="hidden"
+					/>
+				</label>
+			</div>
+
 			<!-- Status -->
 			<div
 				id="status"
@@ -201,26 +249,41 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		parseXtreamUrl,
 		testXtreamConnection,
 		testM3UUrl,
+		LOCAL_M3U_SCHEME,
+		readLocalM3UContent,
 		isTauri,
 	} from "@/scripts/lib/creds.js";
 	import { t } from "@/scripts/lib/i18n.js";
+	import { parseM3U } from "@/scripts/lib/m3u-parser.ts";
+	import { isAndroidFsActive, pickM3UFile } from "@/scripts/lib/android-fs.js";
+	import { log } from "@/scripts/lib/log.js";
+
+	const MAX_LOCAL_M3U_BYTES = 25 * 1024 * 1024; // 25 MiB
 
 	const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
 	const tabXtream = $("tab-xtream");
 	const tabM3u = $("tab-m3u");
+	const tabLocal = $("tab-local");
 	const xFields = $("xtream-fields");
 	const mFields = $("m3u-fields");
+	const lFields = $("local-fields");
 	const titleEl = $("title");
 	const serverEl = $("serverUrl");
 	const userEl = $("username");
 	const passEl = $("password");
 	const m3uEl = $("m3uUrl");
+	const localPickBtn = $("localPickBtn");
+	const localFileInput = $("localFileInput");
+	const localFileNameEl = $("localFileName");
 	const statusEl = $("status");
 	const testBtn = $("testBtn");
 	const saveBtn = $("saveBtn");
 	const pageTitle = $("page-title");
 	const pageSubtitle = $("page-subtitle");
+
+	/** @type {{ name: string, text: string } | null} */
+	let pickedLocal = null;
 
 	const params = new URLSearchParams(location.search);
 	const editingId = params.get("edit");
@@ -237,22 +300,30 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		const prev = mode;
 		mode = next;
 		const isX = next === "xtream";
+		const isM = next === "m3u";
+		const isL = next === "local-m3u";
 		xFields.classList.toggle("hidden", !isX);
 		xFields.classList.toggle("flex", isX);
-		mFields.classList.toggle("hidden", isX);
-		mFields.classList.toggle("flex", !isX);
+		mFields.classList.toggle("hidden", !isM);
+		mFields.classList.toggle("flex", isM);
+		lFields.classList.toggle("hidden", !isL);
+		lFields.classList.toggle("flex", isL);
 
 		if (prev && prev !== next) {
-			const shown = isX ? xFields : mFields;
+			const shown = isX ? xFields : isM ? mFields : lFields;
 			shown.classList.remove("fade-section");
 			void shown.offsetWidth;
 			shown.classList.add("fade-section");
 		}
 
 		applyTabStyles(tabXtream, isX);
-		applyTabStyles(tabM3u, !isX);
+		applyTabStyles(tabM3u, isM);
+		applyTabStyles(tabLocal, isL);
 
-		testBtn.classList.remove("hidden");
+		// Local-file picking is its own verification - the Test button has no
+		// remote endpoint to probe, so hide it. We still run parseM3U inline
+		// after picking and surface the result via showStatus().
+		testBtn.classList.toggle("hidden", isL);
 		clearStatus();
 	}
 
@@ -270,6 +341,129 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		if (editing) return;
 		setMode("m3u");
 	});
+	tabLocal.addEventListener("click", () => {
+		if (editing) return;
+		setMode("local-m3u");
+	});
+
+	function setPickedLocal(picked) {
+		pickedLocal = picked;
+		if (picked) {
+			localFileNameEl.removeAttribute("data-i18n");
+			localFileNameEl.textContent = picked.name;
+			localFileNameEl.classList.remove("text-fg-3");
+			localFileNameEl.classList.add("text-fg-2");
+		} else {
+			localFileNameEl.setAttribute("data-i18n", "login.field.localFile.none");
+			localFileNameEl.textContent = t("login.field.localFile.none");
+			localFileNameEl.classList.remove("text-fg-2");
+			localFileNameEl.classList.add("text-fg-3");
+		}
+	}
+
+	function looksLikeM3U(text) {
+		const head = (text || "").slice(0, 4096);
+		return head.includes("#EXTM3U") || /#EXTINF\s*:/i.test(head);
+	}
+
+	async function pickLocalViaTauri() {
+		const { open } = await import("@tauri-apps/plugin-dialog");
+		const picked = await open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: "M3U playlist", extensions: ["m3u", "m3u8"] }],
+		});
+		if (!picked || typeof picked !== "string") return null;
+		const fs = await import("@tauri-apps/plugin-fs");
+		try {
+			const stat = await fs.stat(picked);
+			if (stat?.size && stat.size > MAX_LOCAL_M3U_BYTES) {
+				showStatus("unavailable", t("login.status.localTooLarge", { size: stat.size.toLocaleString() }));
+				return null;
+			}
+		} catch {}
+		const text = await fs.readTextFile(picked);
+		const slash = Math.max(picked.lastIndexOf("/"), picked.lastIndexOf("\\"));
+		const name = slash >= 0 ? picked.slice(slash + 1) : picked;
+		return { name, text };
+	}
+
+	async function readPickedFile(file) {
+		if (!file) return null;
+		if (file.size > MAX_LOCAL_M3U_BYTES) {
+			showStatus("unavailable", t("login.status.localTooLarge", { size: file.size.toLocaleString() }));
+			return null;
+		}
+		const text = await file.text();
+		return { name: file.name, text };
+	}
+
+	localPickBtn.addEventListener("click", async () => {
+		clearStatus();
+		localPickBtn.disabled = true;
+		try {
+			let picked = null;
+			if (isAndroidFsActive()) {
+				try {
+					picked = await pickM3UFile();
+				} catch (err) {
+					log.warn("[xt:login] android-fs picker failed, falling back:", err);
+				}
+			} else if (isTauri) {
+				try {
+					picked = await pickLocalViaTauri();
+				} catch (err) {
+					log.warn("[xt:login] tauri file picker failed, falling back:", err);
+				}
+			}
+			if (!picked) {
+				localFileInput.value = "";
+				localFileInput.click();
+				return;
+			}
+			if (picked.text && picked.text.length > MAX_LOCAL_M3U_BYTES) {
+				showStatus("unavailable", t("login.status.localTooLarge", { size: picked.text.length.toLocaleString() }));
+				return;
+			}
+			finalizePickedFile(picked);
+		} finally {
+			localPickBtn.disabled = false;
+		}
+	});
+
+	localFileInput.addEventListener("change", async () => {
+		const file = localFileInput.files?.[0];
+		if (!file) return;
+		const picked = await readPickedFile(file);
+		localFileInput.value = "";
+		if (picked) finalizePickedFile(picked);
+	});
+
+	function finalizePickedFile(picked) {
+		if (!picked || !picked.text) {
+			showStatus("unavailable", t("login.status.localEmpty"));
+			setPickedLocal(null);
+			return;
+		}
+		if (!looksLikeM3U(picked.text)) {
+			showStatus("unavailable", t("login.status.localNotM3u"));
+			setPickedLocal(null);
+			return;
+		}
+		const parsed = parseM3U(picked.text);
+		const count = parsed.entries.length;
+		setPickedLocal(picked);
+		if (!titleEl.value.trim()) {
+			titleEl.value = picked.name.replace(/\.(m3u8?|M3U8?)$/, "");
+		}
+		showStatus(
+			"active",
+			t("login.status.playlistOk") +
+				(count
+					? t("login.status.playlistEntries", { count: count.toLocaleString() })
+					: ".")
+		);
+	}
 
 	serverEl.addEventListener("input", () => {
 		const parsed = parseXtreamUrl(serverEl.value.trim());
@@ -434,7 +628,7 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 				};
 				if (editing) await updateEntry(editing._id, patch);
 				else await addEntry(patch);
-			} else {
+			} else if (mode === "m3u") {
 				const url = m3uEl.value.trim();
 				if (!/^https?:\/\/[^\s]+\.m3u8?(\?.*)?$/i.test(url)) {
 					showStatus(
@@ -450,6 +644,39 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 				};
 				if (editing) await updateEntry(editing._id, patch);
 				else await addEntry(patch);
+			} else {
+				if (!pickedLocal || !pickedLocal.text) {
+					showStatus("unavailable", t("login.status.localPickFirst"));
+					return;
+				}
+				const parsed = parseM3U(pickedLocal.text);
+				const patch = {
+					type: "local-m3u",
+					title: titleEl.value.trim() || pickedLocal.name.replace(/\.(m3u8?|M3U8?)$/, ""),
+					content: pickedLocal.text,
+					sourceName: pickedLocal.name,
+					epgUrl: parsed.epgUrl || "",
+				};
+				let savedId = editing?._id || null;
+				if (editing) {
+					await updateEntry(editing._id, patch);
+				} else {
+					const saved = await addEntry(patch);
+					savedId = saved._id;
+				}
+				if (savedId && parsed.epgUrl) {
+					try {
+						localStorage.setItem(`xt_m3u_epg:${savedId}`, parsed.epgUrl);
+					} catch {}
+				}
+				if (savedId) {
+					try {
+						const { warmupActive } = await import("@/scripts/lib/catalog.js");
+						await warmupActive(savedId, { force: true });
+					} catch (err) {
+						log.warn("[xt:login] post-save warmup failed:", err);
+					}
+				}
 			}
 			location.href = editing ? "/" : "/livetv";
 		} finally {
@@ -471,14 +698,24 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		saveBtn.textContent = t("login.action.saveEdit");
 		tabXtream.disabled = editing.type !== "xtream";
 		tabM3u.disabled = editing.type !== "m3u";
+		tabLocal.disabled = editing.type !== "local-m3u";
 		setMode(editing.type);
 		titleEl.value = editing.title || "";
 		if (editing.type === "xtream") {
 			serverEl.value = editing.serverUrl || "";
 			userEl.value = editing.username || "";
 			passEl.value = editing.password || "";
-		} else {
+		} else if (editing.type === "m3u") {
 			m3uEl.value = editing.url || "";
+		} else {
+			// local-m3u: surface what was already saved. User can pick a new
+			// file to replace it; otherwise we keep the existing content,
+			// which lives in IDB (see local-content.js).
+			const existingText = await readLocalM3UContent(LOCAL_M3U_SCHEME + editing._id);
+			setPickedLocal({
+				name: editing.sourceName || editing.title || "",
+				text: existingText,
+			});
 		}
 	} else if (isDemo) {
 		pageTitle.setAttribute("data-i18n", "login.title.demo");

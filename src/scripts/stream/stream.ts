@@ -8,6 +8,8 @@ import {
   safeHttpUrl,
   buildApiUrl,
   isLikelyM3USource,
+  isLocalM3UHost,
+  readLocalM3UContent,
 } from "@/scripts/lib/creds.js"
 import { normalize, scoreNormMatch } from "@/scripts/lib/text.js"
 import { debounce } from "@/scripts/lib/debounce.js"
@@ -1462,9 +1464,14 @@ async function loadChannels() {
         "m3u",
         CHANNELS_TTL_MS,
         async () => {
-          const r = await providerFetch(creds.host)
-          if (!r.ok) throw new Error(`M3U ${r.status}: ${await r.text()}`)
-          const text = await r.text()
+          let text
+          if (isLocalM3UHost(creds.host)) {
+            text = await readLocalM3UContent(creds.host)
+          } else {
+            const r = await providerFetch(creds.host)
+            if (!r.ok) throw new Error(`M3U ${r.status}: ${await r.text()}`)
+            text = await r.text()
+          }
           return parseM3U(text)
             .filter((x) => x.url && x.name)
             .sort((a, b) =>

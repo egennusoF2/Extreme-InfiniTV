@@ -50,7 +50,7 @@ function injectStyles() {
       top: max(1rem, env(safe-area-inset-top));
       left: 50%;
       transform: translateX(-50%);
-      z-index: 9999;
+      z-index: 10001;
       display: flex;
       flex-direction: column;
       align-items: center;

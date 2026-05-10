@@ -174,6 +174,36 @@ export async function convertSrc(uri) {
 }
 
 /**
+ * Open the system file picker for an M3U / M3U8 playlist and read its
+ * contents as UTF-8 text.
+ * @returns {Promise<{text: string, name: string} | null>} null if the user
+ *          cancelled or the plugin isn't available.
+ */
+export async function pickM3UFile() {
+  const m = await mod()
+  if (!m) return null
+  const uris = await m.AndroidFs.showOpenFilePicker({
+    mimeTypes: [
+      "audio/x-mpegurl",
+      "application/vnd.apple.mpegurl",
+      "application/x-mpegurl",
+      "text/plain",
+      "application/octet-stream",
+      "*/*",
+    ],
+    multiple: false,
+  })
+  const uri = Array.isArray(uris) ? uris[0] : null
+  if (!uri) return null
+  let name = ""
+  try {
+    name = (await m.AndroidFs.getName(uri)) || ""
+  } catch {}
+  const text = await m.AndroidFs.readTextFile(uri)
+  return { text, name }
+}
+
+/**
  * Open the system file picker and read the picked file as UTF-8 text.
  * @returns {Promise<{text: string, name: string} | null>} null if the user
  *          cancelled or the plugin isn't available.

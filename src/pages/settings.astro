@@ -2426,7 +2426,12 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
         title.textContent = entry.title || "(untitled)"
         const sub = document.createElement("span")
         sub.className = "truncate text-2xs text-fg-3"
-        sub.textContent = entry.type === "m3u" ? "M3U source" : "Xtream"
+        sub.textContent =
+          entry.type === "xtream"
+            ? "Xtream"
+            : entry.type === "local-m3u"
+            ? "Local file"
+            : "M3U source"
         labelWrap.append(title, sub)
         row.appendChild(labelWrap)
 
