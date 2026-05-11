@@ -79,6 +79,13 @@ describe("buildMpvArgs", () => {
     expect(args).toContain("--hwdec=auto")
     expect(args).not.toContain("")
   })
+
+  it("filters out whitespace-only strings in extraArgs", () => {
+    const args = buildMpvArgs({ src: SRC, extraArgs: ["--hwdec=auto", "   ", "\t"] })
+    expect(args).toContain("--hwdec=auto")
+    expect(args).not.toContain("   ")
+    expect(args).not.toContain("\t")
+  })
 })
 
 describe("buildVlcArgs", () => {
@@ -95,12 +102,12 @@ describe("buildVlcArgs", () => {
     expect(args.at(-1)).toBe(SRC)
   })
 
-  it("includes --play-and-exit, --no-qt-error-dialogs, --no-fullscreen by default", () => {
+  it("includes --play-and-exit, --no-qt-error-dialogs, --no-fullscreen, --no-qt-minimal-view by default", () => {
     const args = buildVlcArgs({ src: SRC })
     expect(args).toContain("--play-and-exit")
     expect(args).toContain("--no-qt-error-dialogs")
     expect(args).toContain("--no-fullscreen")
-    expect(args).not.toContain("--qt-minimal-view")
+    expect(args).toContain("--no-qt-minimal-view")
     expect(args).not.toContain("--no-video-title-show")
   })
 

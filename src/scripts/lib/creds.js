@@ -439,7 +439,8 @@ export function isLocalM3UHost(host) {
 /**
  * Read the stored M3U text for a local-m3u entry. `host` is the
  * `xt-local://<id>` sentinel returned by loadCreds(). Returns the empty
- * string if the entry has gone missing.
+ * string if the entry has gone missing. Throws when the underlying IDB
+ * read fails so callers don't cache an empty playlist on transient errors.
  *
  * Falls back to a `content` field on the entry itself for backward
  * compatibility with the first version of the feature, which embedded the
@@ -451,6 +452,9 @@ export async function readLocalM3UContent(host) {
   const id = host.slice(LOCAL_M3U_SCHEME.length)
   const { getLocalContent, setLocalContent } = await import("./local-content.js")
   const fromIdb = await getLocalContent(id)
+  if (fromIdb === null) {
+    throw new Error("local-m3u storage unavailable")
+  }
   if (fromIdb) return fromIdb
   const entries = await getEntries()
   const entry = entries.find((e) => e._id === id && e.type === "local-m3u")

@@ -17,6 +17,7 @@ import android.util.Rational
 import android.os.Build
 import android.webkit.JavascriptInterface
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -26,11 +27,12 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RequiresApi(Build.VERSION_CODES.O)
 private class RenderGoneGuardingClient(
   private val delegate: WebViewClient,
-  private val onRenderGone: (RenderProcessGoneDetail) -> Unit,
+  private val onRenderGone: (WebView, RenderProcessGoneDetail) -> Unit,
 ) : WebViewClient() {
   override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
     delegate.shouldInterceptRequest(view, request)
@@ -51,9 +53,7 @@ private class RenderGoneGuardingClient(
   }
 
   override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-    (view.parent as? ViewGroup)?.removeView(view)
-    view.destroy()
-    onRenderGone(detail)
+    onRenderGone(view, detail)
     return true
   }
 }
@@ -147,6 +147,14 @@ class MainActivity : TauriActivity() {
   // Cached so the back-press handler can call onHideCustomView without re-walking the view tree.
   private var hostedWebView: WebView? = null
 
+  private val rendererRecreating = AtomicBoolean(false)
+
+  companion object {
+    private const val RENDER_GONE_REPEAT_WINDOW_MS = 60_000L
+    @Volatile
+    private var lastRenderGoneAt: Long = 0L
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
@@ -179,7 +187,8 @@ class MainActivity : TauriActivity() {
       WebSettingsBridge(this, { hostedWebView }, webView.settings.userAgentString),
       "AndroidWebSettings"
     )
-    WebView.setWebContentsDebuggingEnabled(true)
+    val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    WebView.setWebContentsDebuggingEnabled(isDebuggable)
 
     // Keep the renderer process from being reclaimed under TV / low-RAM
     // pressure. Default WAIVED is what triggers most renderer-gone crashes
@@ -194,19 +203,38 @@ class MainActivity : TauriActivity() {
     webView.settings.mediaPlaybackRequiresUserGesture = false
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val tauriClient = webView.webViewClient
-      webView.webViewClient = RenderGoneGuardingClient(tauriClient) { detail ->
-        Log.w(
-          "xtream-rs",
-          "WebView render process gone (didCrash=${detail.didCrash()}, priority=${detail.rendererPriorityAtExit()}); recreating activity"
-        )
-        Toast.makeText(
-          applicationContext,
-          "Reloaded after a display crash",
-          Toast.LENGTH_LONG
-        ).show()
-        if (!isFinishing && !isDestroyed) {
-          recreate()
+      webView.post {
+        val tauriClient = webView.webViewClient
+        webView.webViewClient = RenderGoneGuardingClient(tauriClient) { deadView, detail ->
+          if (!rendererRecreating.compareAndSet(false, true)) {
+            return@RenderGoneGuardingClient
+          }
+          val now = System.currentTimeMillis()
+          val sinceLast = now - lastRenderGoneAt
+          lastRenderGoneAt = now
+          val didCrash = detail.didCrash()
+          val isRepeat = sinceLast in 1..RENDER_GONE_REPEAT_WINDOW_MS
+          Log.w(
+            "xtream-rs",
+            "WebView render process gone (didCrash=$didCrash, priority=${detail.rendererPriorityAtExit()}, sinceLast=${sinceLast}ms, repeat=$isRepeat)"
+          )
+          val messageRes = when {
+            isRepeat -> R.string.render_gone_repeat
+            didCrash -> R.string.render_gone_crash
+            else -> R.string.render_gone_oom
+          }
+          Toast.makeText(applicationContext, messageRes, Toast.LENGTH_LONG).show()
+          hostedWebView = null
+          fullscreenView = null
+          fullscreenCallback = null
+          (deadView.parent as? ViewGroup)?.removeView(deadView)
+          deadView.destroy()
+          if (isRepeat) {
+            return@RenderGoneGuardingClient
+          }
+          if (!isFinishing && !isDestroyed) {
+            recreate()
+          }
         }
       }
     }

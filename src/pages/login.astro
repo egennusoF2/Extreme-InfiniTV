@@ -711,7 +711,12 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 			// local-m3u: surface what was already saved. User can pick a new
 			// file to replace it; otherwise we keep the existing content,
 			// which lives in IDB (see local-content.js).
-			const existingText = await readLocalM3UContent(LOCAL_M3U_SCHEME + editing._id);
+			let existingText = "";
+			try {
+				existingText = await readLocalM3UContent(LOCAL_M3U_SCHEME + editing._id);
+			} catch {
+				// Storage hiccup - degrade to an empty picker so the user can re-attach the file.
+			}
 			setPickedLocal({
 				name: editing.sourceName || editing.title || "",
 				text: existingText,

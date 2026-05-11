@@ -25,8 +25,7 @@ let _dbPromise = null
 function openDB() {
   if (_dbPromise) return _dbPromise
   if (typeof indexedDB === "undefined") {
-    _dbPromise = Promise.reject(new Error("IndexedDB unavailable"))
-    return _dbPromise
+    return Promise.reject(new Error("IndexedDB unavailable"))
   }
   _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
@@ -39,6 +38,9 @@ function openDB() {
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
     req.onblocked = () => reject(new Error("IDB blocked"))
+  })
+  _dbPromise.catch(() => {
+    _dbPromise = null
   })
   return _dbPromise
 }
@@ -232,14 +234,18 @@ export async function cachedFetch(entryId, kind, ttlMs, fetcher, opts = {}) {
       return { data: hit.data, fromCache: true, age: hit.age, stale: false }
     }
     if (hit && hit.stale) {
-      revalidateInBackground(entryId, kind, ttlMs, fetcher)
+      const key = makeKey(entryId, kind)
+      const failedAt = _revalidateFailedAt.get(key) || 0
+      if (Date.now() - failedAt > REVALIDATE_BACKOFF_MS) {
+        revalidateInBackground(entryId, kind, ttlMs, fetcher)
+      }
       return { data: hit.data, fromCache: true, age: hit.age, stale: true }
     }
   }
   const inflightKey = makeKey(entryId, kind) + (opts.force ? ":force" : "")
   const existing = _inflightFetch.get(inflightKey)
   if (existing) return existing
-  const run = (async () => {
+  const run = Promise.resolve().then(async () => {
     try {
       const data = await fetcher()
       setCached(entryId, kind, data, ttlMs)
@@ -247,12 +253,14 @@ export async function cachedFetch(entryId, kind, ttlMs, fetcher, opts = {}) {
     } finally {
       _inflightFetch.delete(inflightKey)
     }
-  })()
+  })
   _inflightFetch.set(inflightKey, run)
   return run
 }
 
 const _revalidating = new Map()
+const _revalidateFailedAt = new Map()
+const REVALIDATE_BACKOFF_MS = 30 * 1000
 
 function revalidateInBackground(entryId, kind, ttlMs, fetcher) {
   const key = makeKey(entryId, kind)
@@ -261,12 +269,14 @@ function revalidateInBackground(entryId, kind, ttlMs, fetcher) {
     try {
       const data = await fetcher()
       setCached(entryId, kind, data, ttlMs)
+      _revalidateFailedAt.delete(key)
       try {
         document.dispatchEvent(
           new CustomEvent(EVT_REVALIDATED, { detail: { entryId, kind } })
         )
       } catch {}
     } catch (e) {
+      _revalidateFailedAt.set(key, Date.now())
       log.warn("[xt:cache] revalidate failed:", kind, e?.message || e)
     } finally {
       _revalidating.delete(key)
@@ -321,23 +331,14 @@ export async function getNewestCacheTimeAsync(entryId) {
 }
 
 export async function getCacheSizeAsync() {
-  try {
-    if (
-      typeof navigator !== "undefined" &&
-      navigator.storage?.estimate
-    ) {
-      const est = await navigator.storage.estimate()
-      if (typeof est.usage === "number") return est.usage
-    }
-  } catch {}
-  // Fallback: stringify each entry. Slow on big catalogs but rare path.
+
   const keys = await idbAllKeys()
   let bytes = 0
-  for (const k of keys) {
-    if (typeof k !== "string" || !k.startsWith(PREFIX)) continue
-    const v = await idbGet(k)
+  for (const key of keys) {
+    if (typeof key !== "string" || !key.startsWith(PREFIX)) continue
+    const value = await idbGet(key)
     try {
-      bytes += k.length + JSON.stringify(v).length
+      bytes += key.length + JSON.stringify(value).length
     } catch {}
   }
   return bytes
@@ -385,20 +386,31 @@ export async function clearAll() {
 // One-time cleanup of legacy localStorage entries.
 // ---------------------------------------------------------------------------
 const LEGACY_CLEANUP_SENTINEL = "xt_cache_legacy_cleaned_v1"
+let _legacyCleanupRan = false
 function runLegacyCleanup() {
+  // Module-level guard first so Safari private mode (where sessionStorage
+  // setItem throws) doesn't re-scan localStorage on every page load.
+  if (_legacyCleanupRan) return
+  _legacyCleanupRan = true
   try {
     if (sessionStorage.getItem(LEGACY_CLEANUP_SENTINEL) === "1") return
   } catch {}
   try {
+    if (localStorage.getItem(LEGACY_CLEANUP_SENTINEL) === "1") return
+  } catch {}
+  try {
     const toRemove = []
     for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)
-      if (k && (k.startsWith(PREFIX) || k === META_LS_KEY)) toRemove.push(k)
+      const key = localStorage.key(i)
+      if (key && (key.startsWith(PREFIX) || key === META_LS_KEY)) toRemove.push(key)
     }
-    for (const k of toRemove) localStorage.removeItem(k)
+    for (const key of toRemove) localStorage.removeItem(key)
   } catch {}
   try {
     sessionStorage.setItem(LEGACY_CLEANUP_SENTINEL, "1")
+  } catch {}
+  try {
+    localStorage.setItem(LEGACY_CLEANUP_SENTINEL, "1")
   } catch {}
 }
 if (typeof window !== "undefined") {

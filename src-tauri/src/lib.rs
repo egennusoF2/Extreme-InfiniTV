@@ -69,6 +69,8 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            external_player::sweep_orphan_mpv_sockets();
             Ok(())
         })
         .run(tauri::generate_context!())

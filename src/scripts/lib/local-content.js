@@ -18,8 +18,7 @@ let dbPromise = null
 function openDB() {
   if (dbPromise) return dbPromise
   if (typeof indexedDB === "undefined") {
-    dbPromise = Promise.reject(new Error("IndexedDB unavailable"))
-    return dbPromise
+    return Promise.reject(new Error("IndexedDB unavailable"))
   }
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
@@ -30,6 +29,9 @@ function openDB() {
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
     req.onblocked = () => reject(new Error("IDB blocked"))
+  })
+  dbPromise.catch(() => {
+    dbPromise = null
   })
   return dbPromise
 }
@@ -56,9 +58,9 @@ export async function setLocalContent(entryId, text) {
 }
 
 /**
- * Read the M3U text for one playlist entry, or "" if missing.
+ * Read the M3U text for one playlist entry
  * @param {string} entryId
- * @returns {Promise<string>}
+ * @returns {Promise<string|null>}
  */
 export async function getLocalContent(entryId) {
   if (!entryId) return ""
@@ -72,7 +74,7 @@ export async function getLocalContent(entryId) {
     })
   } catch (e) {
     log.warn("[xt:local-content] getLocalContent failed:", e)
-    return ""
+    return null
   }
 }
 

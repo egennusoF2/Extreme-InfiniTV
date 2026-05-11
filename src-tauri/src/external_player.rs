@@ -17,6 +17,7 @@ use std::io::Write;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -61,19 +62,27 @@ pub struct ReuseConfig {
 
 impl ExternalPlayerState {
     fn get(&self, kind: &str) -> Option<Slot> {
-        self.inner.lock().ok()?.get(kind).cloned()
+        let guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.get(kind).cloned()
     }
 
     fn set(&self, kind: &str, slot: Slot) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.insert(kind.to_string(), slot);
-        }
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.insert(kind.to_string(), slot);
     }
 
-    fn drop_slot(&self, kind: &str) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.remove(kind);
-        }
+    fn drop_slot(&self, kind: &str) -> Option<Slot> {
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.remove(kind)
     }
 }
 
@@ -158,7 +167,9 @@ fn spawn_detect(path: String, mut args: Vec<String>) -> Result<String, String> {
             Ok(None) => {
                 if started.elapsed() >= budget {
                     let _ = child.kill();
-                    let _ = child.wait();
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
                     return Err(format!(
                         "TIMEOUT:{path} did not exit within {DETECT_TIMEOUT_MS}ms"
                     ));
@@ -173,12 +184,15 @@ fn spawn_detect(path: String, mut args: Vec<String>) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 // Endpoint generation
 // ---------------------------------------------------------------------------
+static ENDPOINT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn unique_suffix() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
+        .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(0);
-    format!("{}-{}", std::process::id(), nanos)
+    let counter = ENDPOINT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{}-{}", std::process::id(), nanos, counter)
 }
 
 fn pick_mpv_endpoint() -> String {
@@ -193,6 +207,49 @@ fn pick_mpv_endpoint() -> String {
         dir.to_string_lossy().into_owned()
     }
 }
+
+#[cfg(unix)]
+fn unlink_unix_socket(endpoint: &str) {
+    if endpoint.is_empty() {
+        return;
+    }
+    let _ = std::fs::remove_file(endpoint);
+}
+
+/// Sweep stale xt-mpv-*.sock files left behind by previously-crashed mpv
+/// instances. Called once at startup so /tmp doesn't accumulate dead sockets
+/// across sessions. Only entries older than ~1h are touched.
+#[cfg(unix)]
+pub fn sweep_orphan_mpv_sockets() {
+    let temp = std::env::temp_dir();
+    let entries = match std::fs::read_dir(&temp) {
+        Ok(it) => it,
+        Err(_) => return,
+    };
+    let now = std::time::SystemTime::now();
+    let stale_after = Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("xt-mpv-") || !name.ends_with(".sock") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let stale = modified
+            .and_then(|time| now.duration_since(time).ok())
+            .map(|elapsed| elapsed > stale_after)
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn sweep_orphan_mpv_sockets() {}
 
 // ---------------------------------------------------------------------------
 // Argv augmentation when reuse is freshly spawned
@@ -226,6 +283,46 @@ fn augment_vlc_args(mut args: Vec<String>) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Pid liveness
+// ---------------------------------------------------------------------------
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    if pid == 0 {
+        return false;
+    }
+    unsafe { kill(pid as i32, 0) == 0 }
+}
+
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    extern "system" {
+        fn OpenProcess(dwDesiredAccess: u32, bInheritHandle: i32, dwProcessId: u32) -> Handle;
+        fn GetExitCodeProcess(hProcess: Handle, lpExitCode: *mut u32) -> i32;
+        fn CloseHandle(hObject: Handle) -> i32;
+    }
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut code);
+        CloseHandle(handle);
+        ok != 0 && code == STILL_ACTIVE
+    }
+}
+
+// ---------------------------------------------------------------------------
 // IPC senders
 // ---------------------------------------------------------------------------
 #[cfg(unix)]
@@ -238,12 +335,58 @@ fn open_mpv_socket(endpoint: &str) -> std::io::Result<std::os::unix::net::UnixSt
 }
 
 #[cfg(windows)]
+const PIPE_WAIT_TIMEOUT_MS: u32 = 500;
+
+#[cfg(windows)]
+fn wait_named_pipe(name: &str, timeout_ms: u32) -> std::io::Result<()> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn WaitNamedPipeW(lpNamedPipeName: *const u16, nTimeOut: u32) -> i32;
+    }
+    let wide: Vec<u16> = OsStr::new(name).encode_wide().chain(std::iter::once(0)).collect();
+    let result = unsafe { WaitNamedPipeW(wide.as_ptr(), timeout_ms) };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
 fn open_mpv_pipe(endpoint: &str) -> std::io::Result<std::fs::File> {
     use std::fs::OpenOptions;
+    // Bound the wait so a stale endpoint (mpv was killed without dropping the
+    // slot) can't block the IPC thread forever. WaitNamedPipeW returns quickly
+    // with ERROR_FILE_NOT_FOUND when no server exists at all.
+    wait_named_pipe(endpoint, PIPE_WAIT_TIMEOUT_MS)?;
     OpenOptions::new()
         .read(true)
         .write(true)
         .open(endpoint)
+}
+
+/// Inspect bytes read back from mpv's JSON-IPC socket
+#[cfg(any(unix, test))]
+fn first_mpv_error(buf: &[u8]) -> Option<String> {
+    for line in buf.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let parsed: Value = match serde_json::from_slice(line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        // Event frames have an "event" field and no "error" - skip them.
+        let error = match parsed.get("error").and_then(|value| value.as_str()) {
+            Some(error) => error,
+            None => continue,
+        };
+        if error != "success" {
+            return Some(error.to_string());
+        }
+    }
+    None
 }
 
 fn build_mpv_loadfile(url: &str, ua: Option<&str>, referer: Option<&str>) -> Vec<u8> {
@@ -290,14 +433,21 @@ fn send_mpv_loadfile(
         stream
             .write_all(&unpause)
             .map_err(|e| format!("IPC:{e}"))?;
-        let mut sink = [0u8; 256];
-        let _ = stream.set_read_timeout(Some(Duration::from_millis(150)));
-        let _ = stream.read(&mut sink);
+        let mut sink = [0u8; 1024];
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+        let read = stream.read(&mut sink).unwrap_or(0);
+        if let Some(err) = first_mpv_error(&sink[..read]) {
+            return Err(format!("IPC:mpv replied {err}"));
+        }
         Ok(())
     }
 
     #[cfg(windows)]
     {
+        // std::fs::File on Windows has no set_read_timeout; reading the
+        // response would need OVERLAPPED I/O. Skip parsing here - the slot
+        // will get cleaned up the next time the client surfaces a failure
+        // (e.g. connect refused on a dead pipe).
         let mut pipe = open_mpv_pipe(endpoint).map_err(|e| format!("IPC:{e}"))?;
         pipe.write_all(&payload).map_err(|e| format!("IPC:{e}"))?;
         pipe.write_all(&unpause).map_err(|e| format!("IPC:{e}"))?;
@@ -323,16 +473,7 @@ pub async fn launch_external_player(
                 .map_err(|e| format!("OTHER:join: {e}"))??;
             Ok(json!({ "version": version }))
         }
-        "exists" => {
-            if path.is_empty() {
-                return Err("NOT_FOUND:player path is empty".to_string());
-            }
-            if Path::new(&path).exists() {
-                Ok(json!({ "version": "(path verified)" }))
-            } else {
-                Err(format!("NOT_FOUND:no file at {path}"))
-            }
-        }
+        "exists" => check_path_exists(&path),
         "launch" => launch_mode(state, path, args, reuse).await,
         other => Err(format!("OTHER:unknown mode '{other}'")),
     }
@@ -361,7 +502,12 @@ async fn launch_mode(
                 Ok(()) => return Ok(json!({ "pid": slot.pid, "reused": true })),
                 Err(err) => {
                     log::warn!("[external-player] mpv reuse send failed: {err}");
-                    state.drop_slot(&kind);
+                    if let Some(dropped) = state.drop_slot(&kind) {
+                        #[cfg(unix)]
+                        unlink_unix_socket(&dropped.endpoint);
+                        #[cfg(not(unix))]
+                        let _ = dropped;
+                    }
                 }
             }
         }
@@ -379,6 +525,17 @@ async fn launch_mode(
     }
 
     if reuse.enabled && kind == "vlc" && !reuse.url.is_empty() {
+        // Probe the cached pid so a manually-killed VLC doesn't get reported
+        // as reused. The slot is otherwise opaque (endpoint stays empty) and
+        // would otherwise live until the app restarts.
+        let prior_alive = match state.get(&kind) {
+            Some(slot) if pid_alive(slot.pid) => true,
+            Some(_) => {
+                state.drop_slot(&kind);
+                false
+            }
+            None => false,
+        };
         let augmented = augment_vlc_args(args.clone());
         let path_for_spawn = path.clone();
         let pid = tauri::async_runtime::spawn_blocking(move || {
@@ -386,11 +543,8 @@ async fn launch_mode(
         })
         .await
         .map_err(|e| format!("OTHER:join: {e}"))??;
-        let reused = state.get(&kind).is_some();
-        // VLC reuse is handled by --one-instance; the slot is just a presence
-        // flag for `reused`, so the endpoint stays empty.
         state.set(&kind, Slot { pid, endpoint: String::new() });
-        return Ok(json!({ "pid": pid, "reused": reused }));
+        return Ok(json!({ "pid": pid, "reused": prior_alive }));
     }
 
     // Plain spawn-and-forget fallthrough.
@@ -399,6 +553,17 @@ async fn launch_mode(
             .await
             .map_err(|e| format!("OTHER:join: {e}"))??;
     Ok(json!({ "pid": pid, "reused": false }))
+}
+
+fn check_path_exists(path: &str) -> Result<Value, String> {
+    if path.is_empty() {
+        return Err("NOT_FOUND:player path is empty".to_string());
+    }
+    if Path::new(path).exists() {
+        Ok(json!({ "version": "(path verified)" }))
+    } else {
+        Err(format!("NOT_FOUND:no file at {path}"))
+    }
 }
 
 fn extract_arg(args: &[String], prefix: &str) -> Option<String> {
@@ -481,6 +646,63 @@ mod tests {
             "opts string must percent-length-encode the UA so commas in the value don't terminate it; got {opts:?}"
         );
         assert!(opts.contains(&format!("referrer=%{}%{}", referer.len(), referer)));
+    }
+
+    #[test]
+    fn first_mpv_error_returns_none_for_all_success() {
+        let buf = br#"{"request_id":0,"error":"success"}
+{"request_id":0,"error":"success"}
+"#;
+        assert!(first_mpv_error(buf).is_none());
+    }
+
+    #[test]
+    fn first_mpv_error_skips_event_frames_without_error_field() {
+        let buf = br#"{"event":"property-change","name":"pause"}
+{"request_id":0,"error":"success"}
+"#;
+        assert!(first_mpv_error(buf).is_none());
+    }
+
+    #[test]
+    fn first_mpv_error_surfaces_non_success() {
+        let buf = br#"{"event":"start-file"}
+{"request_id":0,"error":"loading failed"}
+{"request_id":0,"error":"success"}
+"#;
+        assert_eq!(first_mpv_error(buf).as_deref(), Some("loading failed"));
+    }
+
+    #[test]
+    fn first_mpv_error_tolerates_partial_garbage() {
+        let buf = b"not json\n{\"request_id\":0,\"error\":\"success\"}\n";
+        assert!(first_mpv_error(buf).is_none());
+    }
+
+    #[test]
+    fn check_path_exists_rejects_empty_path() {
+        let err = check_path_exists("").unwrap_err();
+        assert!(err.starts_with("NOT_FOUND:"), "got {err}");
+    }
+
+    #[test]
+    fn check_path_exists_reports_hit_for_existing_file() {
+        let result = check_path_exists(file!()).unwrap();
+        assert_eq!(result["version"], "(path verified)");
+    }
+
+    #[test]
+    fn check_path_exists_reports_miss_for_nonexistent_file() {
+        let bogus = format!("{}-definitely-not-here.xyz", file!());
+        let err = check_path_exists(&bogus).unwrap_err();
+        assert!(err.starts_with("NOT_FOUND:"), "got {err}");
+    }
+
+    #[test]
+    fn unique_suffix_is_distinct_within_same_nanosecond_bucket() {
+        let a = unique_suffix();
+        let b = unique_suffix();
+        assert_ne!(a, b, "back-to-back unique_suffix calls must differ");
     }
 
     #[test]

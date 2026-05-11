@@ -129,7 +129,7 @@ export function buildMpvArgs(input: ArgvInput): string[] {
     out.push(`--start=${Math.floor(resume)}`)
   }
   for (const arg of input.extraArgs || []) {
-    if (arg) out.push(arg)
+    if (arg && arg.trim()) out.push(arg)
   }
   out.push(input.src)
   return out
@@ -150,7 +150,7 @@ export function buildVlcArgs(input: ArgvInput): string[] {
     out.push(`--start-time=${Math.floor(resume)}`)
   }
   for (const arg of input.extraArgs || []) {
-    if (arg) out.push(arg)
+    if (arg && arg.trim()) out.push(arg)
   }
   out.push(input.src)
   return out
@@ -449,8 +449,14 @@ export async function mountPlayer(
 ): Promise<Mounted> {
   if (backend === "mpv" || backend === "vlc") {
     if (!externalPlayersAvailable) {
-      // Fall back to the default in-app backend if external isn't possible.
       log.warn(`[xt:player] external backend "${backend}" requested but not available; falling back to videojs`)
+      try {
+        document.dispatchEvent(
+          new CustomEvent("xt:player-fallback", {
+            detail: { requested: backend, used: "videojs" },
+          }),
+        )
+      } catch {}
       return mountPlayer(videoEl, "videojs", options)
     }
     return {
