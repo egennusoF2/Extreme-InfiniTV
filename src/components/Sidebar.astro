@@ -39,8 +39,9 @@ const tabItems = [
 const moreItems = [
   { href: "/favorites",      key: "nav.favorites",     label: "Favorites",      Icon: IconStar,     match: (p) => p === "/favorites" || p.startsWith("/favorites/") },
   { href: "/watchlist",      key: "nav.watchlist",     label: "Watchlist",      Icon: IconBookmark, match: (p) => p === "/watchlist" || p.startsWith("/watchlist/") },
-  { href: "/recently-added", key: "nav.recentlyAdded", label: "Recently added", Icon: IconSparkles, match: (p) => p === "/recently-added" || p.startsWith("/recently-added/") },
-  { href: "/downloads",      key: "nav.downloads",     label: "Downloads",      Icon: IconDownload, match: (p) => p === "/downloads" || p.startsWith("/downloads/"), id: "mobile-more-downloads" },
+  { href: "/recently-added", key: "nav.recentlyAdded", label: "Recently added", Icon: IconSparkles,     match: (p) => p === "/recently-added" || p.startsWith("/recently-added/") },
+  { href: "/epg",            key: "nav.epg",           label: "EPG",            Icon: IconCalendarTime, match: (p) => p === "/epg" || p.startsWith("/epg/") },
+  { href: "/downloads",      key: "nav.downloads",     label: "Downloads",      Icon: IconDownload,     match: (p) => p === "/downloads" || p.startsWith("/downloads/"), id: "mobile-more-downloads" },
   { href: "/settings",       key: "nav.settings",      label: "Settings",       Icon: IconSettings, match: (p) => p === "/settings"  || p.startsWith("/settings/") },
 ]
 

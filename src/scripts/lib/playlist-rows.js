@@ -8,6 +8,7 @@ import {
 } from "./icons.js"
 import { escapeHtml, fmtAge } from "./format.js"
 import { t } from "./i18n.js"
+import { confirmDialog } from "./confirm-dialog.ts"
 import {
   getPlaylistHealth,
   refreshPlaylistHealth,
@@ -156,7 +157,13 @@ export function renderPlaylistRow({
     del.innerHTML = `<span class="inline-flex text-base">${ICON_TRASH}</span>`
     del.addEventListener("click", async (ev) => {
       ev.stopPropagation()
-      if (!confirm(t("playlist.removeConfirm", { title: entry.title }))) return
+      const ok = await confirmDialog({
+        title: t("playlist.removeAria", { title: entry.title }),
+        message: t("playlist.removeConfirm", { title: entry.title }),
+        confirmLabel: t("common.delete"),
+        destructive: true,
+      })
+      if (!ok) return
       await removeEntry(entry._id)
       if (onAfterRemove) await onAfterRemove()
     })
@@ -393,7 +400,13 @@ function paintPlaylistHealthInto(panel, entry, opts = {}) {
       `<span>${escapeHtml(t("playlist.remove") || "Remove")}</span>`
     del.addEventListener("click", async (ev) => {
       ev.stopPropagation()
-      if (!confirm(t("playlist.removeConfirm", { title: entry.title }))) return
+      const ok = await confirmDialog({
+        title: t("playlist.removeAria", { title: entry.title }),
+        message: t("playlist.removeConfirm", { title: entry.title }),
+        confirmLabel: t("common.delete"),
+        destructive: true,
+      })
+      if (!ok) return
       await removeEntry(entry._id)
       if (onAfterRemove) await onAfterRemove()
     })

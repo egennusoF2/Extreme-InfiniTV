@@ -1322,40 +1322,60 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
         const snapshot = await exportAll()
         const json = JSON.stringify(snapshot, null, 2)
         const filename = suggestedFilename()
+        let savedTo = ""
         if (isTauri && isAndroid) {
+          const androidFs = await import("@/scripts/lib/android-fs.js")
+          let pickerError = null
           try {
-            const { saveJsonFile } = await import("@/scripts/lib/android-fs.js")
-            const written = await saveJsonFile(filename, json)
+            const written = await androidFs.saveJsonFile(filename, json)
             if (!written) {
               setLoading(exportBtn, false)
               return
             }
           } catch (e) {
-            log.error("[settings:export] android-fs save failed:", e)
-            await downloadBlobWeb(filename, json)
+            pickerError = e
+            log.warn(
+              "[settings:export] SAF save picker failed, falling back to public Download/:",
+              e
+            )
           }
-        } else if (isTauri) {
-          try {
-            const { save } = await import("@tauri-apps/plugin-dialog")
-            const target = await save({
-              defaultPath: filename,
-              filters: [{ name: "JSON", extensions: ["json"] }],
-            })
-            if (!target) {
-              setLoading(exportBtn, false)
+          if (pickerError) {
+            try {
+              const publicPath = await androidFs.savePublicJsonFile(filename, json)
+              savedTo = publicPath || ""
+            } catch (publicErr) {
+              log.error("[settings:export] public Download/ save failed:", publicErr)
+              toastError(t("settings.toast.backupExportFail"), {
+                description:
+                  (publicErr && publicErr.message) ||
+                  (pickerError && pickerError.message) ||
+                  "Android FS is not available.",
+                duration: 7000,
+              })
               return
             }
-            const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-            await writeTextFile(target, json)
-          } catch (e) {
-            log.error("[settings:export] tauri save failed:", e)
-            await downloadBlobWeb(filename, json)
           }
+        } else if (isTauri) {
+          const { save } = await import("@tauri-apps/plugin-dialog")
+          const target = await save({
+            defaultPath: filename,
+            filters: [{ name: "JSON", extensions: ["json"] }],
+          })
+          if (!target) {
+            setLoading(exportBtn, false)
+            return
+          }
+          const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+          await writeTextFile(target, json)
+          savedTo = target
         } else {
           await downloadBlobWeb(filename, json)
         }
         toastSuccess(t("settings.toast.backupExported"), {
-          description: `${snapshot.creds.entries.length} playlist(s).`,
+          description: savedTo
+            ? `${snapshot.creds.entries.length} playlist(s) - ${savedTo}`
+            : `${snapshot.creds.entries.length} playlist(s).`,
+          duration: 6000,
         })
         flashMsg(backupMsgEl, "Saved.")
       } catch (e) {
@@ -2008,6 +2028,10 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
         }
       } catch (e) {
         log.error("Pick folder failed:", e)
+        toastError(t("settings.toast.pickFolderFail"), {
+          description: (e && e.message) || String(e) || "See console.",
+          duration: 7000,
+        })
       } finally {
         setLoading(dirPickBtn, false)
       }

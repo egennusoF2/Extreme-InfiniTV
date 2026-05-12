@@ -250,6 +250,46 @@ export async function saveJsonFile(defaultFileName, text) {
 }
 
 /**
+ * Drop a JSON file directly into the public Downloads/Extreme InfiniTV/
+ * folder via MediaStore. No picker UI - used as a fallback when the SAF
+ * "Save As" picker is unavailable on the device.
+ *
+ * @returns the on-device path (best effort) or the URI string of the
+ *          written file, or null if the plugin isn't available.
+ */
+export async function savePublicJsonFile(filename, text) {
+  const m = await mod()
+  if (!m) return null
+  const uri = await m.AndroidFs.createNewPublicFile(
+    m.AndroidPublicGeneralPurposeDir.Download,
+    `${PUBLIC_SUBDIR}/${filename}`,
+    "application/json",
+    { isPending: true }
+  )
+  if (!uri) return null
+  const bytes = new TextEncoder().encode(text)
+  try {
+    await m.AndroidFs.writeFile(uri, bytes)
+  } catch (e) {
+    try {
+      await m.AndroidFs.removeFile(uri)
+    } catch {}
+    throw e
+  }
+  try {
+    await m.AndroidFs.setPublicFilePending(uri, false)
+  } catch (e) {
+    log.warn("[xt:android-fs] setPublicFilePending(false) failed:", e)
+  }
+  try {
+    await m.AndroidFs.scanPublicFile(uri)
+  } catch (e) {
+    log.warn("[xt:android-fs] scanPublicFile failed:", e)
+  }
+  return `Download/${PUBLIC_SUBDIR}/${filename}`
+}
+
+/**
  * Hand the URI off to Android's system "Open with..." chooser via
  * Intent.ACTION_VIEW. The user picks VLC / MX Player / native gallery / etc.
  * In-WebView local-file playback is broken on Android in current Tauri 2

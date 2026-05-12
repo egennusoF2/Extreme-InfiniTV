@@ -3,12 +3,6 @@ package com.infinitel8p.xtream
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.ConsoleMessage
-import android.webkit.GeolocationPermissions
-import android.webkit.JsPromptResult
-import android.webkit.JsResult
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebSettings
@@ -18,7 +12,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
 import android.app.PictureInPictureParams
-import android.net.Uri
 import android.util.Log
 import android.util.Rational
 import android.os.Build
@@ -65,8 +58,11 @@ private class RenderGoneGuardingClient(
   }
 }
 
+// wry's RustWebChromeClient.onShowCustomView calls callback.onCustomViewHidden()
+// and returns immediately, declining to host the HTML5 fullscreen custom view.
+// We replace it with this plain subclass that actually attaches the SurfaceView
+// to the activity decor, which is what `<video>`.requestFullscreen() needs.
 private class FullscreenAwareChromeClient(
-  private val delegate: RustWebChromeClient,
   private val onShow: (View, CustomViewCallback) -> Unit,
   private val onHide: () -> Unit,
 ) : WebChromeClient() {
@@ -76,44 +72,6 @@ private class FullscreenAwareChromeClient(
 
   override fun onHideCustomView() {
     onHide()
-  }
-
-  override fun onPermissionRequest(request: PermissionRequest) {
-    delegate.onPermissionRequest(request)
-  }
-
-  override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean =
-    delegate.onJsAlert(view, url, message, result)
-
-  override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean =
-    delegate.onJsConfirm(view, url, message, result)
-
-  override fun onJsPrompt(
-    view: WebView,
-    url: String,
-    message: String,
-    defaultValue: String,
-    result: JsPromptResult,
-  ): Boolean = delegate.onJsPrompt(view, url, message, defaultValue, result)
-
-  override fun onGeolocationPermissionsShowPrompt(
-    origin: String,
-    callback: GeolocationPermissions.Callback,
-  ) {
-    delegate.onGeolocationPermissionsShowPrompt(origin, callback)
-  }
-
-  override fun onShowFileChooser(
-    webView: WebView,
-    filePathCallback: ValueCallback<Array<Uri?>?>,
-    fileChooserParams: FileChooserParams,
-  ): Boolean = delegate.onShowFileChooser(webView, filePathCallback, fileChooserParams)
-
-  override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean =
-    delegate.onConsoleMessage(consoleMessage)
-
-  override fun onReceivedTitle(view: WebView, title: String) {
-    delegate.onReceivedTitle(view, title)
   }
 }
 
@@ -208,8 +166,6 @@ class MainActivity : TauriActivity() {
 
   private val rendererRecreating = AtomicBoolean(false)
 
-  private lateinit var rustChromeClient: RustWebChromeClient
-
   companion object {
     private const val RENDER_GONE_REPEAT_WINDOW_MS = 60_000L
     @Volatile
@@ -219,8 +175,6 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
-
-    rustChromeClient = RustWebChromeClient(this)
 
     // Back button exits fullscreen first, then falls back to default behavior.
     onBackPressedDispatcher.addCallback(
@@ -303,7 +257,6 @@ class MainActivity : TauriActivity() {
     }
 
     webView.webChromeClient = FullscreenAwareChromeClient(
-      delegate = rustChromeClient,
       onShow = { view, callback ->
         if (fullscreenView != null) {
           callback.onCustomViewHidden()
@@ -349,5 +302,12 @@ class MainActivity : TauriActivity() {
 
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+    // wry 0.55+ pauses the WebView in WryActivity.onPause() (wry 0.53/0.54 did
+    // not). Android transitions the activity through onPause() into PiP and keeps
+    // it paused for the whole PiP session, so without this resume the WebView
+    // renderer stays frozen and the overlay renders black.
+    if (isInPictureInPictureMode) {
+      hostedWebView?.onResume()
+    }
   }
 }

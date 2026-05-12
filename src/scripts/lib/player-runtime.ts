@@ -447,6 +447,7 @@ export async function mountPlayer(
   backend: PlayerBackend = getPlayerBackend(),
   options: MountOptions = {},
 ): Promise<Mounted> {
+  if (backend === "artplayer" && isAndroid) backend = "videojs"
   if (backend === "mpv" || backend === "vlc") {
     if (!externalPlayersAvailable) {
       log.warn(`[xt:player] external backend "${backend}" requested but not available; falling back to artplayer`)
