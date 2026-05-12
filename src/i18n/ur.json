@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "\"{scheme}://\" اسٹریمز ایمبیڈڈ پلیئر میں نہیں چل سکتیں۔ ترتیبات → پلے بیک میں MPV یا VLC سیٹ اپ کریں۔",
   "stream.offline.title": "آپ آف لائن ہیں",
   "stream.offline.body": "دیکھنا جاری رکھنے کے لیے دوبارہ کنیکٹ کریں۔",
+  "stream.offline.reconnectFailedTitle": "ابھی بھی مسئلہ ہے",
+  "stream.offline.reconnectFailedBody": "دوبارہ کنیکٹ ہو گیا، لیکن کیٹلاگ تازہ نہیں ہو سکا۔ اپنی پلے لسٹ چیک کریں یا دوبارہ کوشش کریں۔",
   "list.toast.hidCategory": "\"{label}\" چھپایا گیا",
   "epg.loadingSkeleton": "آپ کا ٹی وی شیڈول لوڈ ہو رہا ہے",
   "epg.loadingChannels": "چینلز لوڈ ہو رہے ہیں",

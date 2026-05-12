@@ -1,4 +1,4 @@
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import { getUserAgent } from "@/scripts/lib/app-settings.js"
 
 const isTauri =
@@ -106,7 +106,7 @@ export function getProviderStats() {
 
 export async function providerFetch(url, init = {}) {
   const ua = getUserAgent()
-  const u = String(url).slice(0, 200)
+  const u = redactUrl(String(url)).slice(0, 200)
   const forceTauri = !!init.forceTauri
 
   const callerSignal = init.signal

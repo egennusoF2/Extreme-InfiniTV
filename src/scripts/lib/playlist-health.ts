@@ -153,9 +153,9 @@ export async function refreshPlaylistHealth(
 
 /** "2 minutes ago", "3 hours ago", "5 days ago", or "never". */
 export function fmtAgo(timestamp: number | null): string {
-  if (!timestamp) return "—"
+  if (!timestamp) return "-"
   const ms = Date.now() - timestamp
-  if (ms < 0) return "—"
+  if (ms < 0) return "-"
   if (ms < 60_000) return "just now"
   const m = Math.floor(ms / 60_000)
   if (m < 60) return `${m}m ago`
@@ -165,12 +165,12 @@ export function fmtAgo(timestamp: number | null): string {
   return `${d}d ago`
 }
 
-/** Locale-formatted date for an exp_date timestamp, or "—" / "never". */
+/** Locale-formatted date for an exp_date timestamp, or "-" / "never". */
 export function fmtAbsDate(timestamp: number | null): string {
-  if (!timestamp) return "—"
+  if (!timestamp) return "-"
   try {
     return new Date(timestamp).toLocaleDateString()
   } catch {
-    return "—"
+    return "-"
   }
 }

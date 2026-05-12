@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "\"{scheme}://\" akışları yerleşik oynatıcıda oynatılamaz. Ayarlar → Oynatma bölümünde MPV veya VLC ayarlayın.",
   "stream.offline.title": "Çevrimdışısınız",
   "stream.offline.body": "İzlemeye devam etmek için yeniden bağlanın.",
+  "stream.offline.reconnectFailedTitle": "Hâlâ sorun var",
+  "stream.offline.reconnectFailedBody": "Yeniden bağlanıldı, ancak katalog yenilenemedi. Oynatma listenizi kontrol edin veya tekrar deneyin.",
   "list.toast.hidCategory": "\"{label}\" gizlendi",
   "epg.loadingSkeleton": "TV yayın akışınız yükleniyor",
   "epg.loadingChannels": "Kanallar yükleniyor",

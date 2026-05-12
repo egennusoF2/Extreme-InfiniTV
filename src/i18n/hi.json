@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "एम्बेडेड प्लेयर में \"{scheme}://\" स्ट्रीम नहीं चला सकते। सेटिंग्स → प्लेबैक में MPV या VLC सेट करें।",
   "stream.offline.title": "आप ऑफ़लाइन हैं",
   "stream.offline.body": "देखना जारी रखने के लिए पुनः कनेक्ट करें।",
+  "stream.offline.reconnectFailedTitle": "अभी भी समस्या है",
+  "stream.offline.reconnectFailedBody": "फिर से कनेक्ट हो गए, लेकिन कैटलॉग रिफ़्रेश नहीं हो सका। अपनी प्लेलिस्ट जाँचें या फिर से कोशिश करें।",
   "list.toast.hidCategory": "\"{label}\" छिपा दिया",
   "epg.loadingSkeleton": "आपका टीवी शेड्यूल लोड हो रहा है",
   "epg.loadingChannels": "चैनल लोड हो रहे हैं",

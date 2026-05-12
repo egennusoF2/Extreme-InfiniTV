@@ -3,6 +3,7 @@
 // reconnect, and dispatches xt:reconnected so EPG / catalog can opt to
 // refresh in the background.
 
+import { log } from "@/scripts/lib/log.js"
 import { toast } from "@/scripts/lib/toast.js"
 import { t } from "@/scripts/lib/i18n.js"
 
@@ -40,7 +41,21 @@ export function initConnectivity() {
     } catch {}
     try {
       const { warmupActive } = await import("@/scripts/lib/catalog.js")
-      warmupActive().catch(() => {})
-    } catch {}
+      warmupActive().catch((err) => {
+        log.warn("[xt:connectivity] warmup after reconnect failed:", err)
+        try {
+          toast({
+            title: t("stream.offline.reconnectFailedTitle") || "Still having trouble",
+            description:
+              t("stream.offline.reconnectFailedBody") ||
+              "Reconnected, but couldn't refresh the catalog. Check your playlist or try again.",
+            variant: "warn",
+            duration: 4000,
+          })
+        } catch {}
+      })
+    } catch (err) {
+      log.warn("[xt:connectivity] catalog module load failed after reconnect:", err)
+    }
   })
 }

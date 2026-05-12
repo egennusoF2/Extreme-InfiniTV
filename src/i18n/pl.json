@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Nie można odtwarzać strumieni \"{scheme}://\" we wbudowanym odtwarzaczu. Skonfiguruj MPV lub VLC w Ustawienia → Odtwarzanie.",
   "stream.offline.title": "Jesteś offline",
   "stream.offline.body": "Połącz się ponownie, aby kontynuować oglądanie.",
+  "stream.offline.reconnectFailedTitle": "Nadal są problemy",
+  "stream.offline.reconnectFailedBody": "Połączono ponownie, ale nie udało się odświeżyć katalogu. Sprawdź swoją playlistę lub spróbuj ponownie.",
   "list.toast.hidCategory": "Ukryto \"{label}\"",
   "epg.loadingSkeleton": "Ładowanie harmonogramu TV",
   "epg.loadingChannels": "Ładowanie kanałów",

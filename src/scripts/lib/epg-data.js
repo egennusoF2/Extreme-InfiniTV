@@ -90,11 +90,23 @@ async function parseXmlTvOffMain(xml) {
   const worker = getXmlWorker()
   if (!worker) return parseXmlTv(xml)
   const id = ++xmlWorkerSeq
-  const reply = await new Promise((resolve, reject) => {
-    xmlWorkerPending.set(id, { resolve, reject })
-    worker.postMessage({ id, xml })
-  }).catch(() => null)
-  if (!reply || reply.fallback) return parseXmlTv(xml)
+  let reply = null
+  try {
+    reply = await new Promise((resolve, reject) => {
+      xmlWorkerPending.set(id, { resolve, reject })
+      worker.postMessage({ id, xml })
+    })
+  } catch (err) {
+    log.warn(
+      "[xt:epg-data] worker parse failed, parsing on main thread (may jank for large EPGs):",
+      err?.message || err
+    )
+    return parseXmlTv(xml)
+  }
+  if (!reply || reply.fallback) {
+    log.warn("[xt:epg-data] worker reported fallback, parsing on main thread")
+    return parseXmlTv(xml)
+  }
   if (reply.error) throw new Error(reply.error)
   return new Map(reply.programmes)
 }
@@ -132,27 +144,27 @@ export function parseXmlTv(xml) {
   const hi = Date.now() + 36 * 60 * 60 * 1000
 
   const list = doc.querySelectorAll("programme")
-  for (const p of list) {
-    const ch = (p.getAttribute("channel") || "").toLowerCase()
-    if (!ch) continue
-    const start = parseXmlTvDate(p.getAttribute("start") || "")
-    const stop = parseXmlTvDate(p.getAttribute("stop") || "")
+  for (const programme of list) {
+    const channel = (programme.getAttribute("channel") || "").toLowerCase()
+    if (!channel) continue
+    const start = parseXmlTvDate(programme.getAttribute("start") || "")
+    const stop = parseXmlTvDate(programme.getAttribute("stop") || "")
     if (!start || !stop || stop <= start) continue
     if (stop < lo || start > hi) continue
 
-    const title = p.querySelector("title")?.textContent?.trim() || "Untitled"
-    const desc = p.querySelector("desc")?.textContent?.trim() || ""
+    const title = programme.querySelector("title")?.textContent?.trim() || "Untitled"
+    const desc = programme.querySelector("desc")?.textContent?.trim() || ""
 
-    let arr = out.get(ch)
+    let arr = out.get(channel)
     if (!arr) {
       arr = []
-      out.set(ch, arr)
+      out.set(channel, arr)
     }
     arr.push({ start, stop, title, desc })
   }
 
   for (const arr of out.values()) {
-    arr.sort((a, b) => a.start - b.start)
+    arr.sort((first, second) => first.start - second.start)
     let lastStop = -Infinity
     let writeIdx = 0
     for (let i = 0; i < arr.length; i++) {
@@ -264,9 +276,9 @@ function applyOffset(programmes, offsetMin) {
   if (!offsetMin) return
   const shift = offsetMin * 60 * 1000
   for (const arr of programmes.values()) {
-    for (const p of arr) {
-      p.start += shift
-      p.stop += shift
+    for (const programme of arr) {
+      programme.start += shift
+      programme.stop += shift
     }
   }
 }

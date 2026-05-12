@@ -1,6 +1,6 @@
 // @ts-nocheck - migrated to TS shell; strict typing pending follow-up
 // Live TV channel list, search, category picker, EPG and Video.js player.
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   loadCreds,
   getActiveEntry,
@@ -2085,7 +2085,7 @@ async function launchExternalLive(backend, src, channelHeaders) {
   const launcher = getExternalLauncher(backend)
   const ua = channelHeaders?.userAgent || getUserAgent() || null
   const referer = channelHeaders?.referer || null
-  log.log(`[xt:livetv] external launch backend=${backend} url=${src}`)
+  log.log(`[xt:livetv] external launch backend=${backend} url=${redactUrl(src)}`)
   toast({
     title: t("settings.playback.launching", { player: backend.toUpperCase() })
       || `Launching ${backend.toUpperCase()}…`,

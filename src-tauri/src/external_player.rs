@@ -18,11 +18,12 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tauri::async_runtime::Mutex as AsyncMutex;
 use tauri::State;
 
 #[cfg(windows)]
@@ -50,6 +51,11 @@ struct Slot {
 #[derive(Default)]
 pub struct ExternalPlayerState {
     inner: Mutex<HashMap<String, Slot>>,
+    /// One async mutex per launch kind ("mpv" / "vlc"). Held across the
+    /// "check existing slot -> IPC send OR spawn new -> persist new slot"
+    /// critical section so two concurrent launches for the same kind can't
+    /// race and orphan a spawned player.
+    locks: Mutex<HashMap<String, Arc<AsyncMutex<()>>>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -84,6 +90,17 @@ impl ExternalPlayerState {
             .unwrap_or_else(|poison| poison.into_inner());
         guard.remove(kind)
     }
+
+    fn launch_lock(&self, kind: &str) -> Arc<AsyncMutex<()>> {
+        let mut guard = self
+            .locks
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard
+            .entry(kind.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,10 +127,34 @@ fn build_command(path: &str, args: &[String]) -> Command {
     cmd
 }
 
+/// Reject paths/args containing characters that have no business in a binary
+/// path or command-line argument. The Rust child-process API itself is
+/// shell-free, but a NUL terminates strings at the OS layer and a newline in
+/// a log line can forge fake structured-log entries. Belt-and-braces only;
+/// callers also enforce the picker UI on the frontend.
+fn validate_arg(value: &str, label: &str) -> Result<(), String> {
+    if value.contains('\0') {
+        return Err(format!("OTHER:{label} contains NUL byte"));
+    }
+    if value.contains('\n') || value.contains('\r') {
+        return Err(format!("OTHER:{label} contains newline"));
+    }
+    Ok(())
+}
+
+fn validate_invocation(path: &str, args: &[String]) -> Result<(), String> {
+    validate_arg(path, "path")?;
+    for arg in args {
+        validate_arg(arg, "arg")?;
+    }
+    Ok(())
+}
+
 fn spawn_launch_inner(path: &str, args: &[String]) -> Result<u32, String> {
     if path.is_empty() {
         return Err("NOT_FOUND:player path is empty".to_string());
     }
+    validate_invocation(path, args)?;
     if !Path::new(path).exists() {
         return Err(format!("NOT_FOUND:no file at {path}"));
     }
@@ -128,6 +169,7 @@ fn spawn_detect(path: String, mut args: Vec<String>) -> Result<String, String> {
     if path.is_empty() {
         return Err("NOT_FOUND:player path is empty".to_string());
     }
+    validate_invocation(&path, &args)?;
     if !args.iter().any(|a| a == "--version") {
         args.push("--version".to_string());
     }
@@ -487,26 +529,46 @@ async fn launch_mode(
 ) -> Result<Value, String> {
     let reuse = reuse.unwrap_or_default();
     let kind = reuse.kind.clone();
+    let reuse_active = reuse.enabled && !reuse.url.is_empty() && (kind == "mpv" || kind == "vlc");
+
+    // Serialize concurrent launches per kind. Without this the
+    // "check slot -> spawn -> persist" sequence can interleave between
+    // callers and orphan one of the spawned players.
+    let lock_arc = if reuse_active { Some(state.launch_lock(&kind)) } else { None };
+    let _guard = if let Some(lock) = &lock_arc { Some(lock.lock().await) } else { None };
 
     if reuse.enabled && kind == "mpv" && !reuse.url.is_empty() {
         // MPV: drive the existing window via JSON-IPC over its socket / pipe.
         if let Some(slot) = state.get(&kind) {
-            let ua = extract_arg(&args, "--user-agent=");
-            let referer = extract_arg(&args, "--referrer=");
-            match send_mpv_loadfile(
-                &slot.endpoint,
-                &reuse.url,
-                ua.as_deref(),
-                referer.as_deref(),
-            ) {
-                Ok(()) => return Ok(json!({ "pid": slot.pid, "reused": true })),
-                Err(err) => {
-                    log::warn!("[external-player] mpv reuse send failed: {err}");
-                    if let Some(dropped) = state.drop_slot(&kind) {
-                        #[cfg(unix)]
-                        unlink_unix_socket(&dropped.endpoint);
-                        #[cfg(not(unix))]
-                        let _ = dropped;
+            let endpoint_alive = pid_alive(slot.pid);
+            if !endpoint_alive {
+                // Pre-emptive cleanup: avoid writing into a stale pipe whose
+                // server has already exited (Windows has no read timeout on
+                // std::fs::File so we'd silently no-op otherwise).
+                if let Some(dropped) = state.drop_slot(&kind) {
+                    #[cfg(unix)]
+                    unlink_unix_socket(&dropped.endpoint);
+                    #[cfg(not(unix))]
+                    let _ = dropped;
+                }
+            } else {
+                let ua = extract_arg(&args, "--user-agent=");
+                let referer = extract_arg(&args, "--referrer=");
+                match send_mpv_loadfile(
+                    &slot.endpoint,
+                    &reuse.url,
+                    ua.as_deref(),
+                    referer.as_deref(),
+                ) {
+                    Ok(()) => return Ok(json!({ "pid": slot.pid, "reused": true })),
+                    Err(err) => {
+                        log::warn!("[external-player] mpv reuse send failed: {err}");
+                        if let Some(dropped) = state.drop_slot(&kind) {
+                            #[cfg(unix)]
+                            unlink_unix_socket(&dropped.endpoint);
+                            #[cfg(not(unix))]
+                            let _ = dropped;
+                        }
                     }
                 }
             }
@@ -559,6 +621,7 @@ fn check_path_exists(path: &str) -> Result<Value, String> {
     if path.is_empty() {
         return Err("NOT_FOUND:player path is empty".to_string());
     }
+    validate_arg(path, "path")?;
     if Path::new(path).exists() {
         Ok(json!({ "version": "(path verified)" }))
     } else {
@@ -713,5 +776,78 @@ mod tests {
         let cmd = parsed["command"].as_array().unwrap();
         assert_eq!(cmd.len(), 3);
         assert_eq!(cmd[2], "replace");
+    }
+
+    #[test]
+    fn validate_arg_rejects_null_byte() {
+        let err = validate_arg("/usr/bin/mpv\0junk", "path").unwrap_err();
+        assert!(err.starts_with("OTHER:"), "got {err}");
+        assert!(err.contains("NUL"), "got {err}");
+    }
+
+    #[test]
+    fn validate_arg_rejects_newline() {
+        let err = validate_arg("foo\nbar", "arg").unwrap_err();
+        assert!(err.starts_with("OTHER:"), "got {err}");
+        assert!(err.contains("newline"), "got {err}");
+    }
+
+    #[test]
+    fn validate_arg_rejects_carriage_return() {
+        let err = validate_arg("foo\rbar", "arg").unwrap_err();
+        assert!(err.contains("newline"), "got {err}");
+    }
+
+    #[test]
+    fn validate_arg_accepts_normal_paths() {
+        validate_arg("/usr/bin/mpv", "path").unwrap();
+        validate_arg("C:\\Program Files\\mpv\\mpv.exe", "path").unwrap();
+        validate_arg("--user-agent=Mozilla/5.0", "arg").unwrap();
+    }
+
+    #[test]
+    fn spawn_launch_inner_rejects_path_with_null_byte() {
+        let err = spawn_launch_inner("/bin/sh\0evil", &[]).unwrap_err();
+        assert!(err.starts_with("OTHER:") || err.starts_with("NOT_FOUND:"), "got {err}");
+    }
+
+    #[test]
+    fn spawn_launch_inner_rejects_arg_with_newline() {
+        // file!() is a real file path, so we get past the NotFound guard
+        // and exercise the validation path on a non-empty argv.
+        let err = spawn_launch_inner(file!(), &["safe".to_string(), "with\nnewline".to_string()])
+            .unwrap_err();
+        assert!(err.starts_with("OTHER:"), "got {err}");
+    }
+
+    #[test]
+    fn external_player_state_launch_lock_is_per_kind() {
+        let state = ExternalPlayerState::default();
+        let mpv_lock = state.launch_lock("mpv");
+        let mpv_lock_again = state.launch_lock("mpv");
+        let vlc_lock = state.launch_lock("vlc");
+        assert!(Arc::ptr_eq(&mpv_lock, &mpv_lock_again));
+        assert!(!Arc::ptr_eq(&mpv_lock, &vlc_lock));
+    }
+
+    #[test]
+    fn external_player_state_drop_slot_returns_old_value() {
+        let state = ExternalPlayerState::default();
+        state.set(
+            "mpv",
+            Slot {
+                pid: 1234,
+                endpoint: "/tmp/x.sock".to_string(),
+            },
+        );
+        let dropped = state.drop_slot("mpv").expect("slot must exist");
+        assert_eq!(dropped.pid, 1234);
+        assert_eq!(dropped.endpoint, "/tmp/x.sock");
+        assert!(state.get("mpv").is_none());
+    }
+
+    #[test]
+    fn pid_alive_returns_false_for_pid_zero() {
+        assert!(!pid_alive(0));
     }
 }

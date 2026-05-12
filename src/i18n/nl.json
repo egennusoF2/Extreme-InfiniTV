@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Kan \"{scheme}://\"-streams niet afspelen in de ingebouwde speler. Stel MPV of VLC in via Instellingen → Afspelen.",
   "stream.offline.title": "Je bent offline",
   "stream.offline.body": "Maak weer verbinding om verder te kijken.",
+  "stream.offline.reconnectFailedTitle": "Nog steeds problemen",
+  "stream.offline.reconnectFailedBody": "Opnieuw verbonden, maar de catalogus kon niet worden vernieuwd. Controleer je afspeellijst of probeer het opnieuw.",
   "list.toast.hidCategory": "\"{label}\" verborgen",
   "epg.loadingSkeleton": "Je tv-schema wordt geladen",
   "epg.loadingChannels": "Kanalen laden",

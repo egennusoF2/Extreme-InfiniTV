@@ -405,7 +405,7 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 			let picked = null;
 			if (isAndroidFsActive()) {
 				try {
-					picked = await pickM3UFile();
+					picked = await pickM3UFile({ maxBytes: MAX_LOCAL_M3U_BYTES });
 				} catch (err) {
 					log.warn("[xt:login] android-fs picker failed, falling back:", err);
 				}
@@ -419,6 +419,11 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 			if (!picked) {
 				localFileInput.value = "";
 				localFileInput.click();
+				return;
+			}
+			if (picked.oversize || (picked.size && picked.size > MAX_LOCAL_M3U_BYTES)) {
+				const oversizeBytes = picked.size || picked.text?.length || 0;
+				showStatus("unavailable", t("login.status.localTooLarge", { size: oversizeBytes.toLocaleString() }));
 				return;
 			}
 			if (picked.text && picked.text.length > MAX_LOCAL_M3U_BYTES) {

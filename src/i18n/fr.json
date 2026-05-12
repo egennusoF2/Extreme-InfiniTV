@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Impossible de lire les flux \"{scheme}://\" dans le lecteur intégré. Configurez MPV ou VLC dans Paramètres → Lecture.",
   "stream.offline.title": "Vous êtes hors ligne",
   "stream.offline.body": "Reconnectez-vous pour continuer à regarder.",
+  "stream.offline.reconnectFailedTitle": "Problèmes persistants",
+  "stream.offline.reconnectFailedBody": "Reconnexion réussie, mais le catalogue n'a pas pu être actualisé. Vérifiez votre playlist ou réessayez.",
   "list.toast.hidCategory": "« {label} » masqué",
   "epg.loadingSkeleton": "Chargement de votre programme",
   "epg.loadingChannels": "Chargement des chaînes",

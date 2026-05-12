@@ -7,6 +7,9 @@ const DB_VERSION = 1
 const STORE = "entries"
 const META_LS_KEY = "xt_cache_meta" // legacy; kept only for clean-up.
 const EVT_REVALIDATED = "xt:cache-revalidated"
+const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // 30d
+const PRUNE_SENTINEL_KEY = "xt_cache_last_pruned_at"
+const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000 // run sweep at most once a day
 
 const makeKey = (entryId, kind) => `${PREFIX}${entryId}:${kind}`
 
@@ -163,6 +166,33 @@ async function idbClearAll() {
 /** @type {Map<string, Promise<void>>} */
 const _hydrating = new Map()
 
+let _pruneRan = false
+async function pruneOldEntries() {
+  if (_pruneRan) return
+  _pruneRan = true
+  try {
+    let lastPrune = 0
+    try { lastPrune = Number(localStorage.getItem(PRUNE_SENTINEL_KEY)) || 0 } catch {}
+    if (Date.now() - lastPrune < PRUNE_INTERVAL_MS) return
+    const keys = await idbAllKeys()
+    let removed = 0
+    for (const key of keys) {
+      if (typeof key !== "string" || !key.startsWith(PREFIX)) continue
+      const value = await idbGet(key)
+      const fetchedAt = value?.fetchedAt || 0
+      if (fetchedAt && Date.now() - fetchedAt > MAX_AGE_MS) {
+        await idbDelete(key)
+        _mem.delete(key)
+        removed++
+      }
+    }
+    try { localStorage.setItem(PRUNE_SENTINEL_KEY, String(Date.now())) } catch {}
+    if (removed > 0) log.log("[xt:cache] pruned", removed, "stale entries (>30d)")
+  } catch (e) {
+    log.warn("[xt:cache] prune sweep failed:", e)
+  }
+}
+
 export async function hydrate(entryId, kind) {
   if (!entryId) return
   const key = makeKey(entryId, kind)
@@ -180,6 +210,13 @@ export async function hydrate(entryId, kind) {
   } finally {
     _hydrating.delete(key)
   }
+  if (!_pruneRan) {
+    const ric =
+      typeof window !== "undefined" && typeof window.requestIdleCallback === "function"
+        ? window.requestIdleCallback
+        : (callback) => setTimeout(callback, 500)
+    ric(() => { pruneOldEntries() }, { timeout: 5000 })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,10 +224,12 @@ export async function hydrate(entryId, kind) {
 // ---------------------------------------------------------------------------
 
 /**
- * Sync cache read from the in-memory map. Returns null if not hydrated.
- * For data that might live in IDB, await hydrate() or cachedFetch() first.
+ * Sync cache read from the in-memory map. Returns null if not hydrated
+ * (await hydrate() / cachedFetch() first for data that may live in IDB).
+ * When hit, callers should consult the `stale` flag rather than checking
+ * for null - a stale entry still has usable `data`.
  *
- * @returns {{ data: any, fetchedAt: number, age: number } | null}
+ * @returns {{ data: any, fetchedAt: number, age: number, stale: boolean } | null}
  */
 export function getCached(entryId, kind) {
   if (!entryId) return null
@@ -331,6 +370,14 @@ export async function getNewestCacheTimeAsync(entryId) {
 }
 
 export async function getCacheSizeAsync() {
+  // Prefer the browser's own quota estimate when available - this is O(1)
+  // and avoids reading + re-stringifying every cached value on the main
+  // thread. The estimate covers our entire origin (IDB + caches + etc.),
+  // which is a close-enough proxy for the catalog cache itself.
+  try {
+    const estimate = await navigator.storage?.estimate?.()
+    if (estimate && typeof estimate.usage === "number") return estimate.usage
+  } catch {}
 
   const keys = await idbAllKeys()
   let bytes = 0

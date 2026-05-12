@@ -27,7 +27,9 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import app.tauri.plugin.PluginManager
 import java.util.concurrent.atomic.AtomicBoolean
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -180,6 +182,14 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
 
+    // Nothing in Tauri 2.11 calls PluginManager.onActivityCreate() automatically,
+    // so SAF pickers (tauri-plugin-android-fs, tauri-plugin-dialog) otherwise
+    // throw "lateinit property startActivityForResultLauncher has not been
+    // initialized". Re-bind on every onCreate so the launchers also survive
+    // recreate() after a WebView render-process-gone restart, where the
+    // singleton's lateinit still points at the dead activity.
+    bindPluginManagerLaunchers()
+
     // Back button exits fullscreen first, then falls back to default behavior.
     onBackPressedDispatcher.addCallback(
       this,
@@ -194,6 +204,74 @@ class MainActivity : TauriActivity() {
         }
       }
     )
+  }
+
+  private fun bindPluginManagerLaunchers() {
+    val pm = PluginManager
+    pm.activity = this
+    val pmClass = pm.javaClass
+
+    fun rebind(fieldName: String, callbackFieldName: String, launcher: Any) {
+      try {
+        pmClass.getDeclaredField(fieldName).apply {
+          isAccessible = true
+          set(pm, launcher)
+        }
+      } catch (e: Throwable) {
+        Log.e("xtream-rs", "PluginManager.$fieldName rebind failed: $e")
+      }
+    }
+
+    try {
+      val saLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("startActivityForResultCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.ActivityResultCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "startActivityForResult callback dispatch failed: $e")
+        }
+      }
+      rebind("startActivityForResultLauncher", "startActivityForResultCallback", saLauncher)
+
+      val isLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("startIntentSenderForResultCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.ActivityResultCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "startIntentSenderForResult callback dispatch failed: $e")
+        }
+      }
+      rebind("startIntentSenderForResultLauncher", "startIntentSenderForResultCallback", isLauncher)
+
+      val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("requestPermissionsCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.RequestPermissionsCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "requestPermissions callback dispatch failed: $e")
+        }
+      }
+      rebind("requestPermissionsLauncher", "requestPermissionsCallback", permLauncher)
+    } catch (e: Throwable) {
+      Log.e("xtream-rs", "bindPluginManagerLaunchers reflection path failed, trying official init", e)
+      try {
+        PluginManager.onActivityCreate(this)
+      } catch (e2: Throwable) {
+        Log.e("xtream-rs", "PluginManager.onActivityCreate fallback also failed", e2)
+      }
+    }
   }
 
   // See https://github.com/tauri-apps/tauri/issues/13049.

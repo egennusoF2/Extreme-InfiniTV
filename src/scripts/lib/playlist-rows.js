@@ -189,7 +189,7 @@ export function getPlaylistListEmptyCopy() {
 // ---------------------------------------------------------------------------
 
 function fmtCount(n) {
-  return Number.isFinite(n) ? n.toLocaleString() : "—"
+  return Number.isFinite(n) ? n.toLocaleString() : "-"
 }
 
 function healthRow(label, value, tone) {
@@ -212,7 +212,7 @@ function healthRow(label, value, tone) {
   if (value && typeof value === "object" && "nodeType" in value) {
     dd.appendChild(value)
   } else {
-    dd.textContent = String(value ?? "—")
+    dd.textContent = String(value ?? "-")
   }
   row.append(dt, dd)
   return row
@@ -252,7 +252,7 @@ function paintPlaylistHealthInto(panel, entry, opts = {}) {
   const conns =
     h.account.activeConnections != null && h.account.maxConnections != null
       ? `${h.account.activeConnections} / ${h.account.maxConnections}`
-      : "—"
+      : "-"
   const connsTone =
     h.account.maxConnections && h.account.activeConnections != null
       ? h.account.activeConnections >= h.account.maxConnections
@@ -260,7 +260,7 @@ function paintPlaylistHealthInto(panel, entry, opts = {}) {
         : "good"
       : "neutral"
 
-  let expiryText = "—"
+  let expiryText = "-"
   let expiryTone = "neutral"
   if (h.account.expDateMs) {
     const days = h.account.daysUntilExpiry
@@ -282,24 +282,24 @@ function paintPlaylistHealthInto(panel, entry, opts = {}) {
 
   const liveText = h.catalog.live.fetchedAt
     ? `${fmtCount(h.catalog.live.itemCount)} · ${fmtAgo(h.catalog.live.fetchedAt)}`
-    : "—"
+    : "-"
   const vodText = h.catalog.vod.fetchedAt
     ? `${fmtCount(h.catalog.vod.itemCount)} · ${fmtAgo(h.catalog.vod.fetchedAt)}`
-    : "—"
+    : "-"
   const seriesText = h.catalog.series.fetchedAt
     ? `${fmtCount(h.catalog.series.itemCount)} · ${fmtAgo(h.catalog.series.fetchedAt)}`
-    : "—"
+    : "-"
 
   const epgText = h.epg.fetchedAt
     ? `${fmtCount(h.epg.channelsWithProgrammes)} · ${fmtAgo(h.epg.fetchedAt)}`
-    : "—"
+    : "-"
 
   const provText =
     h.provider.successes || h.provider.failures
       ? `${h.provider.successes} ok · ${h.provider.failures} fail · ${t(
           "settings.health.lastOk"
         )} ${fmtAgo(h.provider.lastSuccessAt)}`
-      : "—"
+      : "-"
   const provTone =
     h.provider.failures > 0 &&
     h.provider.lastFailureAt > h.provider.lastSuccessAt

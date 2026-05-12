@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "无法在嵌入式播放器中播放 \"{scheme}://\" 流。请在“设置 → 播放”中配置 MPV 或 VLC。",
   "stream.offline.title": "您当前离线",
   "stream.offline.body": "请重新连接以继续观看。",
+  "stream.offline.reconnectFailedTitle": "仍有问题",
+  "stream.offline.reconnectFailedBody": "已重新连接，但无法刷新目录。请检查您的播放列表或重试。",
   "list.toast.hidCategory": "已隐藏「{label}」",
   "epg.loadingSkeleton": "正在加载节目表",
   "epg.loadingChannels": "正在加载频道",

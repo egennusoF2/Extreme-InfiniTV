@@ -11,6 +11,7 @@ import { log } from "@/scripts/lib/log.js"
 const DB_NAME = "xt_local_content"
 const DB_VERSION = 1
 const STORE = "entries"
+export const LOCAL_CONTENT_MAX_BYTES = 25 * 1024 * 1024 // 25 MiB
 
 /** @type {Promise<IDBDatabase>|null} */
 let dbPromise = null
@@ -37,28 +38,46 @@ function openDB() {
 }
 
 /**
- * Persist the M3U text for one playlist entry.
+ * Persist the M3U text for one playlist entry. Rejects payloads larger
+ * than LOCAL_CONTENT_MAX_BYTES so callers that bypass the login.astro
+ * pre-check can't still wedge a multi-GB playlist into IDB.
+ *
  * @param {string} entryId
  * @param {string} text
+ * @returns {Promise<boolean>} true if persisted, false if rejected.
  */
 export async function setLocalContent(entryId, text) {
-  if (!entryId) return
+  if (!entryId) return false
+  const value = text || ""
+  if (value.length > LOCAL_CONTENT_MAX_BYTES) {
+    log.warn(
+      "[xt:local-content] setLocalContent rejected oversize payload:",
+      value.length,
+      ">",
+      LOCAL_CONTENT_MAX_BYTES
+    )
+    return false
+  }
   try {
     const db = await openDB()
     await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite")
-      tx.objectStore(STORE).put(text || "", entryId)
+      tx.objectStore(STORE).put(value, entryId)
       tx.oncomplete = () => resolve(true)
       tx.onerror = () => reject(tx.error)
       tx.onabort = () => reject(tx.error)
     })
+    return true
   } catch (e) {
     log.error("[xt:local-content] setLocalContent failed:", e)
+    return false
   }
 }
 
 /**
- * Read the M3U text for one playlist entry
+ * Read the M3U text for one playlist entry. Returns "" if the entry has
+ * no stored content, or null when IDB itself is unavailable / threw.
+ *
  * @param {string} entryId
  * @returns {Promise<string|null>}
  */

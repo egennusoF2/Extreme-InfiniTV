@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Не удаётся воспроизвести потоки \"{scheme}://\" во встроенном плеере. Настройте MPV или VLC в разделе Настройки → Воспроизведение.",
   "stream.offline.title": "Вы не в сети",
   "stream.offline.body": "Подключитесь заново, чтобы продолжить просмотр.",
+  "stream.offline.reconnectFailedTitle": "Всё ещё есть проблемы",
+  "stream.offline.reconnectFailedBody": "Соединение восстановлено, но не удалось обновить каталог. Проверьте плейлист или повторите попытку.",
   "list.toast.hidCategory": "Скрыто «{label}»",
   "epg.loadingSkeleton": "Загрузка телепрограммы",
   "epg.loadingChannels": "Загрузка каналов",

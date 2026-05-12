@@ -175,11 +175,16 @@ export async function convertSrc(uri) {
 
 /**
  * Open the system file picker for an M3U / M3U8 playlist and read its
- * contents as UTF-8 text.
- * @returns {Promise<{text: string, name: string} | null>} null if the user
- *          cancelled or the plugin isn't available.
+ * contents as UTF-8 text. `maxBytes` is checked via getByteLength before
+ * the file is read into WebView memory, so picking a multi-GB file no
+ * longer OOMs the renderer.
+ *
+ * @param {{ maxBytes?: number }} [opts]
+ * @returns {Promise<{text: string, name: string, size: number, oversize?: boolean} | null>}
+ *          null if the user cancelled or the plugin isn't available;
+ *          `oversize: true` if the file exceeded `maxBytes`.
  */
-export async function pickM3UFile() {
+export async function pickM3UFile(opts = {}) {
   const m = await mod()
   if (!m) return null
   const uris = await m.AndroidFs.showOpenFilePicker({
@@ -199,8 +204,16 @@ export async function pickM3UFile() {
   try {
     name = (await m.AndroidFs.getName(uri)) || ""
   } catch {}
+  let size = 0
+  try {
+    size = Number(await m.AndroidFs.getByteLength(uri)) || 0
+  } catch {}
+  const maxBytes = typeof opts.maxBytes === "number" && opts.maxBytes > 0 ? opts.maxBytes : 0
+  if (maxBytes && size > maxBytes) {
+    return { text: "", name, size, oversize: true }
+  }
   const text = await m.AndroidFs.readTextFile(uri)
-  return { text, name }
+  return { text, name, size: size || text.length }
 }
 
 /**

@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Não é possível reproduzir streams \"{scheme}://\" no player integrado. Configure MPV ou VLC em Configurações → Reprodução.",
   "stream.offline.title": "Você está offline",
   "stream.offline.body": "Reconecte-se para continuar assistindo.",
+  "stream.offline.reconnectFailedTitle": "Ainda com problemas",
+  "stream.offline.reconnectFailedBody": "Reconectado, mas não foi possível atualizar o catálogo. Verifique sua playlist ou tente de novo.",
   "list.toast.hidCategory": "Ocultou \"{label}\"",
   "epg.loadingSkeleton": "Carregando sua programação",
   "epg.loadingChannels": "Carregando canais",

@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "تعذّر تشغيل بثوث \"{scheme}://\" في المشغّل المضمَّن. أعدّ MPV أو VLC من الإعدادات → التشغيل.",
   "stream.offline.title": "أنت غير متصل بالإنترنت",
   "stream.offline.body": "أعد الاتصال لمتابعة المشاهدة.",
+  "stream.offline.reconnectFailedTitle": "لا تزال هناك مشكلة",
+  "stream.offline.reconnectFailedBody": "تمت إعادة الاتصال، لكن تعذّر تحديث الكتالوج. تحقق من قائمة التشغيل أو حاول مرة أخرى.",
   "list.toast.hidCategory": "تم إخفاء \"{label}\"",
   "epg.loadingSkeleton": "جارٍ تحميل جدول التلفاز",
   "epg.loadingChannels": "جارٍ تحميل القنوات",

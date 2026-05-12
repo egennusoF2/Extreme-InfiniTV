@@ -487,7 +487,7 @@ async function runDownload(id) {
       if (m) total = Number(m[1])
       else total = received + Number(res.headers.get("content-length") || 0)
     } else {
-      // Server didn't honor Range — restart from byte 0.
+      // Server didn't honor Range; restart from byte 0.
       if (received > 0) {
         await fs.writeFile(item.path, new Uint8Array(0))
         received = 0

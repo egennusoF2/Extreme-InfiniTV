@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "\"{scheme}://\" ストリームは内蔵プレーヤーで再生できません。設定 → 再生で MPV または VLC を設定してください。",
   "stream.offline.title": "オフラインです",
   "stream.offline.body": "視聴を続けるには再接続してください。",
+  "stream.offline.reconnectFailedTitle": "まだ問題があります",
+  "stream.offline.reconnectFailedBody": "再接続しましたが、カタログを更新できませんでした。プレイリストを確認するか、もう一度お試しください。",
   "list.toast.hidCategory": "「{label}」を非表示にしました",
   "epg.loadingSkeleton": "番組表を読み込み中",
   "epg.loadingChannels": "チャンネルを読み込み中",

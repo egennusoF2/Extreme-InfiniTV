@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "Tidak bisa memutar streaming \"{scheme}://\" di pemutar bawaan. Atur MPV atau VLC di Pengaturan → Pemutaran.",
   "stream.offline.title": "Anda sedang offline",
   "stream.offline.body": "Sambungkan kembali untuk terus menonton.",
+  "stream.offline.reconnectFailedTitle": "Masih bermasalah",
+  "stream.offline.reconnectFailedBody": "Tersambung kembali, tetapi katalog tidak dapat diperbarui. Periksa daftar putar Anda atau coba lagi.",
   "list.toast.hidCategory": "Menyembunyikan \"{label}\"",
   "epg.loadingSkeleton": "Memuat jadwal TV Anda",
   "epg.loadingChannels": "Memuat saluran",

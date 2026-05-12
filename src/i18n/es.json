@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "No se pueden reproducir flujos \"{scheme}://\" en el reproductor integrado. Configura MPV o VLC en Ajustes → Reproducción.",
   "stream.offline.title": "Estás sin conexión",
   "stream.offline.body": "Vuelve a conectarte para seguir viendo.",
+  "stream.offline.reconnectFailedTitle": "Sigue habiendo problemas",
+  "stream.offline.reconnectFailedBody": "Te has reconectado, pero no se pudo actualizar el catálogo. Comprueba tu lista de reproducción o vuelve a intentarlo.",
   "list.toast.hidCategory": "Se ocultó «{label}»",
   "epg.loadingSkeleton": "Cargando tu programación",
   "epg.loadingChannels": "Cargando canales",

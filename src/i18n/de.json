@@ -542,6 +542,8 @@
   "stream.error.schemeUnsupported": "\"{scheme}://\"-Streams können nicht im eingebetteten Player wiedergegeben werden. Richte MPV oder VLC in Einstellungen → Wiedergabe ein.",
   "stream.offline.title": "Du bist offline",
   "stream.offline.body": "Stelle die Verbindung wieder her, um weiterzusehen.",
+  "stream.offline.reconnectFailedTitle": "Es gibt weiterhin Probleme",
+  "stream.offline.reconnectFailedBody": "Verbindung wiederhergestellt, aber der Katalog konnte nicht aktualisiert werden. Überprüfe deine Playlist oder versuche es erneut.",
   "list.toast.hidCategory": "„{label}\" ausgeblendet",
   "epg.loadingSkeleton": "Programm wird geladen",
   "epg.loadingChannels": "Sender werden geladen",
