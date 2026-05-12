@@ -255,13 +255,16 @@
     const onInput = document.activeElement === inputEl
     if (onInput && ev.key === "ArrowDown") {
       ev.preventDefault()
+      ev.stopImmediatePropagation()
       if (results.length) activeIndex = (activeIndex + 1) % results.length
     } else if (onInput && ev.key === "ArrowUp") {
       ev.preventDefault()
+      ev.stopImmediatePropagation()
       if (results.length)
         activeIndex = (activeIndex - 1 + results.length) % results.length
     } else if (ev.key === "Enter" && onInput) {
       ev.preventDefault()
+      ev.stopImmediatePropagation()
       navigate(results[activeIndex])
     } else if (ev.key === "Escape") {
       if (query) {
@@ -286,6 +289,7 @@
     document.addEventListener(EPG_LOADED_EVENT, onEpgLoaded)
     document.addEventListener("xt:active-changed", () => loadIndex())
     document.addEventListener(LOCALE_EVENT, onLocale)
+    window.addEventListener("keydown", onKey, true)
     if (focusOnMount) {
       tick().then(() => {
         inputEl?.focus()
@@ -296,12 +300,11 @@
       document.removeEventListener("xt:catalog-warmed", onWarmed)
       document.removeEventListener(EPG_LOADED_EVENT, onEpgLoaded)
       document.removeEventListener(LOCALE_EVENT, onLocale)
+      window.removeEventListener("keydown", onKey, true)
       if (_queryTimer) clearTimeout(_queryTimer)
     }
   })
 </script>
-
-<svelte:window onkeydown={onKey} />
 
 <section class="search-view flex flex-col gap-4 flex-1 min-h-0">
   <div class="flex flex-col gap-3 shrink-0">

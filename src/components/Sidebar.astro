@@ -271,6 +271,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     id="mobile-more-panel"
     data-open="false"
     aria-hidden="true"
+    inert
     class="absolute bottom-full inset-x-0 z-10
            border-t border-line bg-bg/95 backdrop-blur-md
            shadow-[0_-12px_32px_-16px_rgba(0,0,0,0.45)]
@@ -606,6 +607,8 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     moreBtn.setAttribute("aria-expanded", open ? "true" : "false")
     morePanel.dataset.open = open ? "true" : "false"
     morePanel.setAttribute("aria-hidden", open ? "false" : "true")
+    if (open) morePanel.removeAttribute("inert")
+    else morePanel.setAttribute("inert", "")
   }
 
   moreBtn?.addEventListener("click", (ev) => {

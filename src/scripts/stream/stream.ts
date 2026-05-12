@@ -33,6 +33,7 @@ import {
 import { ICON_X } from "@/scripts/lib/icons.js"
 import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { attachPlayerFocusKeeper } from "@/scripts/lib/player-focus-keeper.js"
+import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { parseM3U as parseSharedM3U } from "@/scripts/lib/m3u-parser.ts"
 import { applyStreamHeaders } from "@/scripts/lib/stream-headers.ts"
@@ -579,8 +580,14 @@ function openChannelDiagnostic(channel) {
 }
 
 let channelMenuEl = null
+const CHANNEL_MENU_ID = "xt-channel-menu"
+const channelMenuSpatialNav = attachPopoverSpatialNav({
+  id: `${CHANNEL_MENU_ID}-section`,
+  selector: `#${CHANNEL_MENU_ID} [role="menuitem"]`,
+})
 function closeChannelMenu() {
   if (!channelMenuEl) return
+  channelMenuSpatialNav.close()
   channelMenuEl.remove()
   channelMenuEl = null
   document.removeEventListener("pointerdown", onChannelMenuOutside, true)
@@ -604,6 +611,7 @@ function onChannelMenuKey(event) {
 function openChannelMenu(channel, anchor, point) {
   closeChannelMenu()
   const menu = document.createElement("div")
+  menu.id = CHANNEL_MENU_ID
   menu.className =
     "fixed z-50 min-w-[12rem] rounded-xl border border-line bg-surface text-fg shadow-2xl " +
     "p-1 flex flex-col gap-0.5"
@@ -672,6 +680,7 @@ function openChannelMenu(channel, anchor, point) {
   menu.style.top = `${Math.max(margin, top)}px`
 
   channelMenuEl = menu
+  channelMenuSpatialNav.open()
   document.addEventListener("pointerdown", onChannelMenuOutside, true)
   document.addEventListener("keydown", onChannelMenuKey, true)
   window.addEventListener("blur", closeChannelMenu)

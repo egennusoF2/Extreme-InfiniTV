@@ -462,6 +462,10 @@ function renderVirtualWindow() {
     row.style.top = `${idx * ROW_HEIGHT}px`
     row.style.left = "0"
     row.style.right = "0"
+    row.dataset.rowIdx = String(idx)
+    for (const cell of row.querySelectorAll(".epg-cell")) {
+      ;(cell as HTMLElement).dataset.rowIdx = String(idx)
+    }
     bodyEl.appendChild(row)
     renderedRows.set(idx, row)
     added = true
@@ -491,6 +495,111 @@ function attachVirtualScrollListener() {
   gridEl.addEventListener("scroll", onVirtualScroll, { passive: true })
   virtualScrollAttached = true
 }
+
+// Vertical D-pad past the rendered window. Spatial-nav can't find rows
+// that aren't mounted (only ±OVERSCAN_ROWS are present), so Up/Down at the
+// edge dead-ends and PgUp/PgDn/Home/End don't move at all. Mirrors the
+// /livetv channel-list handler in stream.ts.
+function focusCellInRow(rowIdx, anchorX) {
+  const row = renderedRows.get(rowIdx)
+  if (!row) return false
+  const cells = Array.from(row.querySelectorAll(".epg-cell")) as HTMLElement[]
+  if (!cells.length) return false
+  let pick = cells[0]
+  if (Number.isFinite(anchorX)) {
+    let bestDist = Infinity
+    for (const cell of cells) {
+      const left = cell.offsetLeft
+      const right = left + cell.offsetWidth
+      const dist =
+        anchorX < left
+          ? left - anchorX
+          : anchorX > right
+          ? anchorX - right
+          : 0
+      if (dist < bestDist) {
+        bestDist = dist
+        pick = cell
+      }
+    }
+  }
+  pick.focus({ preventScroll: true })
+  return true
+}
+
+function ensureRowVisible(rowIdx) {
+  if (!gridEl) return
+  const top = rowIdx * ROW_HEIGHT
+  const visTop = gridEl.scrollTop
+  const visBottom = visTop + gridEl.clientHeight
+  if (top < visTop) {
+    gridEl.scrollTop = Math.max(0, top - ROW_HEIGHT * 2)
+  } else if (top + ROW_HEIGHT > visBottom) {
+    gridEl.scrollTop = top + ROW_HEIGHT - gridEl.clientHeight + ROW_HEIGHT * 2
+  }
+}
+
+gridEl?.addEventListener(
+  "keydown",
+  (event) => {
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "PageDown" &&
+      event.key !== "PageUp" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    )
+      return
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    const focused = document.activeElement as HTMLElement | null
+    const cell = focused?.closest?.(".epg-cell") as HTMLElement | null
+    if (!cell) return
+    const fromIdx = Number(cell.dataset.rowIdx)
+    if (!Number.isFinite(fromIdx)) return
+    const total = channels.length
+    if (!total) return
+    const pageRows = Math.max(
+      1,
+      Math.floor((gridEl?.clientHeight || ROW_HEIGHT) / ROW_HEIGHT) - 1
+    )
+    let next = fromIdx
+    switch (event.key) {
+      case "ArrowDown":
+        next = fromIdx + 1
+        break
+      case "ArrowUp":
+        next = fromIdx - 1
+        break
+      case "PageDown":
+        next = fromIdx + pageRows
+        break
+      case "PageUp":
+        next = fromIdx - pageRows
+        break
+      case "Home":
+        next = 0
+        break
+      case "End":
+        next = total - 1
+        break
+    }
+    next = Math.max(0, Math.min(total - 1, next))
+    if (next === fromIdx) return
+    event.preventDefault()
+    event.stopPropagation()
+    const anchorX = cell.offsetLeft + cell.offsetWidth / 2
+    ensureRowVisible(next)
+    renderVirtualWindow()
+    if (!focusCellInRow(next, anchorX)) {
+      requestAnimationFrame(() => {
+        renderVirtualWindow()
+        focusCellInRow(next, anchorX)
+      })
+    }
+  },
+  true
+)
 
 function render() {
   if (!gridEl || !bodyEl || !headerInner) return

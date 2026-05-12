@@ -13,8 +13,15 @@
   import { hydrate as hydrateCache } from "@/scripts/lib/cache.js"
   import { toastSuccess, toastError } from "@/scripts/lib/toast.js"
   import { t } from "@/scripts/lib/i18n.js"
+  import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 
   const SECTION_ID = "ps-popover-section"
+
+  const spatialNav = attachPopoverSpatialNav({
+    id: SECTION_ID,
+    selector: "#ps-popover button, #ps-popover a",
+    defaultElement: "#ps-popover button[data-id], #ps-popover a",
+  })
 
   let isOpen = $state(false)
   // The fallback string is read on `renderHeader()` (mount + every locale
@@ -35,28 +42,13 @@
   /** @type {HTMLElement | undefined} */
   let listEl
 
-  let sectionRegistered = false
-
   async function openPopover() {
     if (isOpen) return
     isOpen = true
     await tick()
     await renderList()
-    const SN = window.SpatialNavigation
-    if (SN && !sectionRegistered) {
-      try {
-        SN.add({
-          id: SECTION_ID,
-          selector: "#ps-popover button, #ps-popover a",
-          restrict: "self-only",
-          enterTo: "default-element",
-          defaultElement: "#ps-popover button[data-id], #ps-popover a",
-        })
-        sectionRegistered = true
-      } catch {}
-    }
+    spatialNav.open()
     requestAnimationFrame(() => {
-      SN?.makeFocusable?.()
       const first = popoverEl?.querySelector("button[data-id], a, button")
       if (first instanceof HTMLElement) first.focus()
     })
@@ -65,13 +57,7 @@
   function closePopover() {
     if (!isOpen) return
     isOpen = false
-    const SN = window.SpatialNavigation
-    if (SN && sectionRegistered) {
-      try {
-        SN.remove(SECTION_ID)
-      } catch {}
-      sectionRegistered = false
-    }
+    spatialNav.close()
     triggerEl?.focus()
   }
 
@@ -186,6 +172,7 @@
       document.removeEventListener("xt:entries-updated", onEntriesUpdated)
       document.removeEventListener("xt:catalog-warmed", onCatalogWarmed)
       document.removeEventListener("xt:locale-changed", onActiveChanged)
+      spatialNav.teardown()
     }
   })
 </script>
