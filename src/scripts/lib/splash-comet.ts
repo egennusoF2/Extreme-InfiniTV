@@ -48,28 +48,27 @@ function parseAccent(): [number, number, number] {
 export function setupSplashComet(splash: HTMLElement): () => void {
   const canvas = splash.querySelector(".xt-app-splash__comet") as HTMLCanvasElement | null
   const pathEl = splash.querySelector("#xt-app-splash-path") as SVGPathElement | null
-  const svgEl = splash.querySelector(".xt-app-splash__svg") as SVGSVGElement | null
-  if (!canvas || !pathEl) return () => {}
+  if (!canvas || !pathEl) return () => { }
 
   const reduced =
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
     document.documentElement.getAttribute("data-perf-mode") === "on"
   if (reduced) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   const ctx = canvas.getContext("2d", { alpha: true })
   if (!ctx) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   let pathLen = 0
-  try { pathLen = pathEl.getTotalLength() } catch {}
+  try { pathLen = pathEl.getTotalLength() } catch { }
   if (pathLen <= 0) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   const accent = parseAccent()
@@ -86,17 +85,25 @@ export function setupSplashComet(splash: HTMLElement): () => void {
   let offsetX = 0
   let offsetY = 0
 
+  const wrap = canvas.parentElement
   const resize = () => {
     const canvasRect = canvas.getBoundingClientRect()
     const cssW = canvasRect.width || 1
     const cssH = canvasRect.height || 1
     canvas.width = Math.max(1, Math.round(cssW * dpr))
     canvas.height = Math.max(1, Math.round(cssH * dpr))
-    if (svgEl) {
-      const svgRect = svgEl.getBoundingClientRect()
-      offsetX = (svgRect.left - canvasRect.left) * dpr
-      offsetY = (svgRect.top - canvasRect.top) * dpr
-      userToPx = (svgRect.width / 24) * dpr
+    if (wrap) {
+      const wrapRect = wrap.getBoundingClientRect()
+      const style = getComputedStyle(wrap)
+      const padLeft = parseFloat(style.paddingLeft) || 0
+      const padTop = parseFloat(style.paddingTop) || 0
+      const padRight = parseFloat(style.paddingRight) || 0
+      const padBottom = parseFloat(style.paddingBottom) || 0
+      const contentW = Math.max(1, wrapRect.width - padLeft - padRight)
+      const contentH = Math.max(1, wrapRect.height - padTop - padBottom)
+      offsetX = (wrapRect.left + padLeft - canvasRect.left) * dpr
+      offsetY = (wrapRect.top + padTop - canvasRect.top) * dpr
+      userToPx = (Math.min(contentW, contentH) / 24) * dpr
     } else {
       offsetX = 0
       offsetY = 0
