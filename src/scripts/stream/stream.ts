@@ -1,6 +1,6 @@
 // @ts-nocheck - migrated to TS shell; strict typing pending follow-up
 // Live TV channel list, search, category picker, EPG and Video.js player.
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   loadCreds,
   getActiveEntry,
@@ -8,6 +8,8 @@ import {
   safeHttpUrl,
   buildApiUrl,
   isLikelyM3USource,
+  isLocalM3UHost,
+  readLocalM3UContent,
 } from "@/scripts/lib/creds.js"
 import { normalize, scoreNormMatch } from "@/scripts/lib/text.js"
 import { debounce } from "@/scripts/lib/debounce.js"
@@ -28,14 +30,32 @@ import {
   getCategoryMode,
   setCategoryMode,
 } from "@/scripts/lib/preferences.js"
-import { toast } from "@/scripts/lib/toast.js"
 import { ICON_X } from "@/scripts/lib/icons.js"
 import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { attachPlayerFocusKeeper } from "@/scripts/lib/player-focus-keeper.js"
+import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { parseM3U as parseSharedM3U } from "@/scripts/lib/m3u-parser.ts"
 import { applyStreamHeaders } from "@/scripts/lib/stream-headers.ts"
 import { renderProviderError } from "@/scripts/lib/provider-error.js"
+import { toast, toastError } from "@/scripts/lib/toast.js"
+import {
+  mountPlayer,
+  externalPlayersAvailable,
+  getExternalLauncher,
+} from "@/scripts/lib/player-runtime.ts"
+import {
+  getPlayerBackend,
+  getPlayerPath,
+  getUserAgent,
+  EXTERNAL_PLAYER_BACKENDS,
+} from "@/scripts/lib/app-settings.js"
+import {
+  setupExternalPlayerButton,
+  surfaceLaunchError,
+  type ExternalPlayerButtonHandle,
+} from "@/scripts/lib/external-player-button.js"
+import { ICON_EXTERNAL_LINK } from "@/scripts/lib/icons.js"
 import {
   loadProgrammes,
   getProgrammesSync,
@@ -44,6 +64,7 @@ import {
   EPG_OFFSET_EVENT,
 } from "@/scripts/lib/epg-data.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
+import { maybeB64ToUtf8, escapeHtml } from "@/scripts/lib/b64-utf8.ts"
 
 const CHANNELS_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -158,9 +179,17 @@ try {
 
 let activePlaylistId = ""
 let activePlaylistTitle = ""
+let activeTuningTransition: any = null
 
 document.addEventListener("xt:active-changed", () => {
   clearRichPresence().catch(() => {})
+  loadChannels()
+})
+
+document.addEventListener("xt:cache-revalidated", (e) => {
+  const detail = /** @type {CustomEvent} */ (e).detail
+  if (!detail || detail.entryId !== activePlaylistId) return
+  if (detail.kind !== "live" && detail.kind !== "m3u") return
   loadChannels()
 })
 
@@ -294,7 +323,12 @@ function renderChannelSkeletons(count) {
 let categoryMap = null
 
 const ROW_H = 68
-const OVERSCAN = 6
+const OVERSCAN_DEFAULT = 6
+const OVERSCAN_PERF = 2
+const isPerfMode = () =>
+  typeof document !== "undefined" &&
+  document.documentElement.getAttribute("data-perf-mode") === "on"
+const getOverscan = () => (isPerfMode() ? OVERSCAN_PERF : OVERSCAN_DEFAULT)
 let renderScheduled = false
 
 let pendingFocusIdx = -1
@@ -387,10 +421,11 @@ function renderVirtual() {
     0,
     Math.min(listEl.clientHeight, window.innerHeight || listEl.clientHeight)
   )
-  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN)
+  const overscan = getOverscan()
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_H) - overscan)
   const endIdx = Math.min(
     filtered.length,
-    Math.ceil((scrollTop + visibleH) / ROW_H) + OVERSCAN
+    Math.ceil((scrollTop + visibleH) / ROW_H) + overscan
   )
 
   const frag = document.createDocumentFragment()
@@ -422,6 +457,7 @@ function renderVirtual() {
         img.alt = ""
         img.loading = "lazy"
         img.decoding = "async"
+        ;(img as any).fetchPriority = "low"
         img.referrerPolicy = "no-referrer"
         img.className = "h-full w-full object-contain"
         img.onload = () => logo.setAttribute("data-loaded", "true")
@@ -544,8 +580,14 @@ function openChannelDiagnostic(channel) {
 }
 
 let channelMenuEl = null
+const CHANNEL_MENU_ID = "xt-channel-menu"
+const channelMenuSpatialNav = attachPopoverSpatialNav({
+  id: `${CHANNEL_MENU_ID}-section`,
+  selector: `#${CHANNEL_MENU_ID} [role="menuitem"]`,
+})
 function closeChannelMenu() {
   if (!channelMenuEl) return
+  channelMenuSpatialNav.close()
   channelMenuEl.remove()
   channelMenuEl = null
   document.removeEventListener("pointerdown", onChannelMenuOutside, true)
@@ -569,6 +611,7 @@ function onChannelMenuKey(event) {
 function openChannelMenu(channel, anchor, point) {
   closeChannelMenu()
   const menu = document.createElement("div")
+  menu.id = CHANNEL_MENU_ID
   menu.className =
     "fixed z-50 min-w-[12rem] rounded-xl border border-line bg-surface text-fg shadow-2xl " +
     "p-1 flex flex-col gap-0.5"
@@ -637,6 +680,7 @@ function openChannelMenu(channel, anchor, point) {
   menu.style.top = `${Math.max(margin, top)}px`
 
   channelMenuEl = menu
+  channelMenuSpatialNav.open()
   document.addEventListener("pointerdown", onChannelMenuOutside, true)
   document.addEventListener("keydown", onChannelMenuKey, true)
   window.addEventListener("blur", closeChannelMenu)
@@ -991,8 +1035,8 @@ function renderCategoryPicker(items) {
   const mode = categoryMode()
   const hidden = hiddenSet()
   const allowed = allowedSet()
-  const visibleNames = mode === "hide" ? names.filter((n) => !hidden.has(n)) : names
-  const hiddenNames = mode === "hide" ? names.filter((n) => hidden.has(n)) : []
+  const visibleNames = mode === "hide" ? names.filter((name) => !hidden.has(name)) : names
+  const hiddenNames = mode === "hide" ? names.filter((name) => hidden.has(name)) : []
   const frag = document.createDocumentFragment()
 
   const highlightActiveInList = () => {
@@ -1214,7 +1258,7 @@ function filterCategories() {
     const isRegularRow = !isAllButton && !isPseudo
     if (isRegularRow) totalCount++
     const label = normalize(val || btn.textContent || "")
-    const searchMatches = !tokens.length || tokens.every((t) => label.includes(t))
+    const searchMatches = !tokens.length || tokens.every((token) => label.includes(token))
     let show = searchMatches
     if (show && filterToSelected && isRegularRow) {
       show = !!allowed && allowed.has(val)
@@ -1432,9 +1476,14 @@ async function loadChannels() {
         "m3u",
         CHANNELS_TTL_MS,
         async () => {
-          const r = await providerFetch(creds.host)
-          if (!r.ok) throw new Error(`M3U ${r.status}: ${await r.text()}`)
-          const text = await r.text()
+          let text
+          if (isLocalM3UHost(creds.host)) {
+            text = await readLocalM3UContent(creds.host)
+          } else {
+            const r = await providerFetch(creds.host)
+            if (!r.ok) throw new Error(`M3U ${r.status}: ${await r.text()}`)
+            text = await r.text()
+          }
           return parseM3U(text)
             .filter((x) => x.url && x.name)
             .sort((a, b) =>
@@ -1524,38 +1573,132 @@ async function loadChannels() {
 // Player (lazy)
 // ----------------------------
 let vjs = null
-const ensurePlayer = async () => {
+let playSeq = 0
+let lastPlayContext = null
+let tuningOverlaySentinel = null
+let stallSentinel = null
+let bufferingShownAt = 0
+let bufferingHideTimer = null
+const TUNING_MAX_MS = 8000
+const STALL_AUTO_TUNE_MS = 30_000
+const BUFFERING_GRACE_MS = 350
+const ERROR_AUTO_RETRY_MS = 1500
+
+// Per-stream diagnostic cooldown
+const AUTO_DIAGNOSTIC_COOLDOWN_MS = 30_000
+const lastAutoDiagnosticAt = new Map()
+
+async function runAutoDiagnostic(ctx, dismissGenericToast) {
+  if (!ctx?.streamId || !ctx.src) return
+
+  const now = Date.now()
+  const last = lastAutoDiagnosticAt.get(ctx.streamId) || 0
+  if (now - last < AUTO_DIAGNOSTIC_COOLDOWN_MS) return
+  lastAutoDiagnosticAt.set(ctx.streamId, now)
+
+  log.log("[xt:livetv] auto-diagnostic starting for", ctx.streamId)
+  const seqAtStart = ctx.seq
+  try {
+    const { diagnoseStream, summarizeReport } = await import(
+      "@/scripts/lib/stream-diagnostic.js"
+    )
+    const report = await diagnoseStream(ctx.src)
+
+    if (seqAtStart !== playSeq) {
+      log.log("[xt:livetv] auto-diagnostic dropped (stream changed)")
+      return
+    }
+    const { verdict, reason } = summarizeReport(report)
+    log.log("[xt:livetv] auto-diagnostic verdict:", verdict, reason)
+    if (!reason) return
+    try { dismissGenericToast?.() } catch {}
+    toastError(
+      t("stream.error.cantPlay", { channel: ctx.name || `#${ctx.streamId}` }),
+      { description: reason, duration: 8000 }
+    )
+  } catch (e) {
+    log.warn("[xt:livetv] auto-diagnostic failed:", e)
+  }
+}
+
+const ensureEmbeddedPlayer = async (backend) => {
   if (vjs) return vjs
-  const [{ default: videojs }] = await Promise.all([
-    import("video.js"),
-    import("video.js/dist/video-js.css"),
-  ])
+  const videoEl = document.getElementById("player")
+  if (!videoEl) return null
   // Hide Video.js's built-in PiP toggle on Tauri Android - the WebView
   // doesn't expose Web PiP so the button always renders disabled. Native
   // PiP goes through the in-page button + AndroidPip bridge instead.
   const hasNativePipBridge = !!window.AndroidPip
-  vjs = videojs("player", {
+  const mounted = await mountPlayer(videoEl, backend, {
     liveui: true,
     fluid: true,
     preload: "auto",
     autoplay: false,
     aspectRatio: "16:9",
+    pictureInPictureToggle: !hasNativePipBridge,
     controlBar: {
       volumePanel: { inline: false },
       pictureInPictureToggle: !hasNativePipBridge,
       playbackRateMenuButton: false,
       fullscreenToggle: true,
     },
-    html5: {
-      vhs: {
-        overrideNative: true,
-        limitRenditionByPlayerDimensions: true,
-        smoothQualityChange: true,
-      },
-    },
+  })
+  if (mounted.kind !== "embedded") return null
+  vjs = mounted.handle
+
+  if (mounted.backend === "videojs") {
+    attachPlayerFocusKeeper(vjs)
+  }
+
+  vjs.on("playing", () => {
+    hideTuningOverlay()
+    hideBufferingChip()
+    clearStallSentinel()
+  })
+  vjs.on("waiting", () => {
+    showBufferingChip()
+    armStallSentinel()
+  })
+  vjs.on("stalled", () => {
+    showBufferingChip()
+    armStallSentinel()
+  })
+  vjs.on("error", () => {
+    const ctx = lastPlayContext
+    if (!ctx) return
+    const err = vjs.error?.()
+    log.error("[xt:livetv] player error", {
+      code: err?.code,
+      message: err?.message,
+      streamId: ctx.streamId,
+    })
+    if (!ctx.retried) {
+      ctx.retried = true
+      const seqAtRetry = ctx.seq
+      setTimeout(() => {
+        if (seqAtRetry !== playSeq) return
+        try {
+          vjs.reset?.()
+          vjs.src({ src: ctx.src, type: "application/x-mpegURL" })
+          vjs.play().catch(() => {})
+        } catch {}
+      }, ERROR_AUTO_RETRY_MS)
+      return
+    }
+    hideTuningOverlay()
+    hideBufferingChip()
+    clearStallSentinel()
+    const dismissGeneric = toastError(
+      t("stream.error.cantPlay", { channel: ctx.name || `#${ctx.streamId}` }),
+      { description: t("stream.error.checkConnection") }
+    )
+    // Background diagnostic: turn the generic "couldn't play" toast into an
+    // actionable one ("HLS playlist returned 403", "Server unreachable",
+    // "Top variant manifest empty", etc.) once we have a verdict. Cooldown
+    // per stream-id so a flapping channel doesn't fire repeated probes.
+    runAutoDiagnostic(ctx, dismissGeneric)
   })
 
-  attachPlayerFocusKeeper(vjs)
   return vjs
 }
 
@@ -1576,10 +1719,77 @@ function showTuningOverlay(logoUrl) {
     overlay.appendChild(img)
   }
   playerWrap.appendChild(overlay)
-  setTimeout(() => {
-    overlay.classList.add("tuning-overlay--leaving")
-    setTimeout(() => overlay.remove(), 380)
-  }, 480)
+  // Cap visibility so we never get stuck on the overlay if `playing` never
+  // fires (dead provider, codec issue, render-process crash on Android).
+  if (tuningOverlaySentinel) clearTimeout(tuningOverlaySentinel)
+  tuningOverlaySentinel = setTimeout(hideTuningOverlay, TUNING_MAX_MS)
+}
+
+function hideTuningOverlay() {
+  if (tuningOverlaySentinel) {
+    clearTimeout(tuningOverlaySentinel)
+    tuningOverlaySentinel = null
+  }
+  const playerWrap = document.getElementById("player")?.parentElement
+  const overlay = playerWrap?.querySelector("[data-tuning-overlay]")
+  if (!overlay) return
+  overlay.classList.add("tuning-overlay--leaving")
+  setTimeout(() => overlay.remove(), 380)
+}
+
+function showBufferingChip() {
+  const playerWrap = document.getElementById("player")?.parentElement
+  if (!playerWrap) return
+  if (bufferingHideTimer) {
+    clearTimeout(bufferingHideTimer)
+    bufferingHideTimer = null
+  }
+  let chip = playerWrap.querySelector("[data-buffering-chip]")
+  if (!chip) {
+    chip = document.createElement("div")
+    chip.dataset.bufferingChip = ""
+    chip.className = "buffering-chip"
+    chip.setAttribute("role", "status")
+    chip.setAttribute("aria-live", "polite")
+    chip.textContent = t("stream.buffering")
+    playerWrap.appendChild(chip)
+  }
+  bufferingShownAt = Date.now()
+}
+
+function hideBufferingChip() {
+  const playerWrap = document.getElementById("player")?.parentElement
+  const chip = playerWrap?.querySelector("[data-buffering-chip]")
+  if (!chip) return
+  // Avoid flicker on transient waiting -> playing toggles.
+  const elapsed = Date.now() - bufferingShownAt
+  const wait = Math.max(0, BUFFERING_GRACE_MS - elapsed)
+  if (bufferingHideTimer) clearTimeout(bufferingHideTimer)
+  bufferingHideTimer = setTimeout(() => {
+    chip.remove()
+    bufferingHideTimer = null
+  }, wait)
+}
+
+function armStallSentinel() {
+  if (stallSentinel) clearTimeout(stallSentinel)
+  stallSentinel = setTimeout(() => {
+    const ctx = lastPlayContext
+    if (!ctx || !vjs) return
+    log.warn("[xt:livetv] stall sentinel re-tuning", { streamId: ctx.streamId })
+    try {
+      vjs.reset?.()
+      vjs.src({ src: ctx.src, type: "application/x-mpegURL" })
+      vjs.play().catch(() => {})
+    } catch {}
+  }, STALL_AUTO_TUNE_MS)
+}
+
+function clearStallSentinel() {
+  if (stallSentinel) {
+    clearTimeout(stallSentinel)
+    stallSentinel = null
+  }
 }
 
 function runScanLineSweep() {
@@ -1616,11 +1826,53 @@ function pushDiscordPresence(channel, kind) {
   })
 }
 
+function pickConfiguredExternal() {
+  for (const kind of EXTERNAL_PLAYER_BACKENDS) {
+    if (getPlayerPath(kind)) return kind
+  }
+  return null
+}
+
 async function play(streamId, name) {
   if (!currentEl) return
   const src = hasDirectUrl(streamId)
     ? getDirectUrl(streamId)
     : buildDirectM3U8(streamId)
+
+  // Embedded players (Video.js + hls.js) only speak http(s). M3U sources can
+  // ship rtsp/rtmp/udp/mms/... - those need MPV/VLC
+  const isHttpSrc = /^https?:\/\//i.test(src || "")
+  if (!isHttpSrc && src) {
+    const selectedBackend = getPlayerBackend()
+    const backendIsExternal =
+      selectedBackend === "mpv" || selectedBackend === "vlc"
+    if (!backendIsExternal) {
+      const externalKind =
+        externalPlayersAvailable ? pickConfiguredExternal() : null
+      const channelHeaders = streamHeadersById.get(streamId) || null
+      if (externalKind) {
+        try {
+          await launchExternalLive(externalKind, src, channelHeaders)
+          showExternalPlayerEmptyState(externalKind, name)
+        } catch (err) {
+          surfaceLaunchError(err, externalKind)
+        }
+        if (activePlaylistId) {
+          const channel = all.find((channel) => channel.id === streamId)
+          pushRecent(activePlaylistId, "live", streamId, name, channel?.logo || null)
+        }
+        setNowPlaying(streamId)
+        return
+      }
+      const scheme = (src.split("://")[0] || "").toLowerCase()
+      toastError(
+        t("stream.error.schemeUnsupported", { scheme }) ||
+          `Can't play "${scheme}://" streams in the embedded player. Set up MPV or VLC in Settings → Playback.`
+      )
+      return
+    }
+    // backend is mpv/vlc - fall through to the existing external launch below.
+  }
 
   if (activePlaylistId) {
     const ch = all.find((c) => c.id === streamId)
@@ -1635,8 +1887,17 @@ async function play(streamId, name) {
   )
   const supportsVT = typeof document.startViewTransition === "function"
   const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-  if (supportsVT && !reduceMotion && sourceLogo instanceof HTMLElement) {
-    sourceLogo.style.viewTransitionName = "tuning-logo"
+  const wantTransition =
+    supportsVT && !reduceMotion && !activeTuningTransition && sourceLogo instanceof HTMLElement
+  if (wantTransition) {
+    for (const stale of document.querySelectorAll<HTMLElement>(
+      '[style*="view-transition-name"]'
+    )) {
+      if (stale !== sourceLogo && stale.style.viewTransitionName === "tuning-logo") {
+        stale.style.viewTransitionName = ""
+      }
+    }
+    sourceLogo!.style.viewTransitionName = "tuning-logo"
   }
 
   const swapState = () => {
@@ -1644,11 +1905,11 @@ async function play(streamId, name) {
 
     currentEl.replaceChildren()
     const wrap = document.createElement("div")
-    wrap.className = "flex items-center gap-2 max-w-[calc(100%-4rem)]"
+    wrap.className = "flex items-center gap-2 min-w-0 flex-1"
     wrap.innerHTML =
-      '<span class="status-badge status-badge--live">ON</span>'
+      '<span class="status-badge status-badge--live shrink-0">ON</span>'
     const label = document.createElement("span")
-    label.className = "truncate w-full"
+    label.className = "truncate min-w-0 flex-1"
     label.append(`Channel ${streamId}: `)
     const nameEl = document.createElement("span")
     nameEl.className = "text-accent"
@@ -1657,24 +1918,70 @@ async function play(streamId, name) {
     wrap.appendChild(label)
     currentEl.appendChild(wrap)
 
+    const btn = document.createElement("button")
+    btn.id = "pip-btn"
+    btn.type = "button"
+    btn.title = "Picture-in-Picture"
+    btn.setAttribute("aria-label", "Picture-in-Picture")
+    btn.className = "shrink-0 inline-flex items-center justify-center min-h-11 min-w-11 px-3.5 rounded-xl border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
+    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M19 4a3 3 0 0 1 3 3v4a1 1 0 0 1 -2 0v-4a1 1 0 0 0 -1 -1h-14a1 1 0 0 0 -1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 1 0 2h-6a3 3 0 0 1 -3 -3v-10a3 3 0 0 1 3 -3z"/><path d="M20 13a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-5a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z"/></svg>`
+    btn.addEventListener("click", () => { if (vjs) togglePip(vjs) })
+    currentEl.appendChild(btn)
+
+    appendExternalLaunchButton(currentEl, streamId, src, name)
+
+    if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
     showTuningOverlay(channelLogo)
     runScanLineSweep()
   }
 
-  if (supportsVT && !reduceMotion) {
+  if (wantTransition) {
     const transition = document.startViewTransition(() => swapState())
-    transition.finished.finally(() => {
-      if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
-    })
+    activeTuningTransition = transition
+    transition.ready?.catch?.(() => {})
+    transition.finished
+      .catch(() => {})
+      .finally(() => {
+        if (activeTuningTransition === transition) activeTuningTransition = null
+        if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
+      })
   } else {
     swapState()
   }
 
+  const backend = getPlayerBackend()
+  const channelHeaders = streamHeadersById.get(streamId) || null
+
+  if (backend === "mpv" || backend === "vlc") {
+    try {
+      await launchExternalLive(backend, src, channelHeaders)
+      showExternalPlayerEmptyState(backend, name)
+    } catch (err) {
+      surfaceLaunchError(err, backend)
+    }
+    if (hasDirectUrl(streamId)) {
+      if (epgList) epgList.innerHTML = `<div class="text-fg-3">No EPG available for M3U source.</div>`
+    } else {
+      loadEPG(streamId)
+    }
+    return
+  }
+
+  resetEmptyState()
   document.getElementById("player")?.removeAttribute("hidden")
-  const player = await ensurePlayer()
-  await applyStreamHeaders(streamHeadersById.get(streamId) || null)
+  const player = await ensureEmbeddedPlayer(backend)
+  if (!player) return
+  await applyStreamHeaders(channelHeaders)
+  const seq = ++playSeq
+  lastPlayContext = { streamId, name, src, seq, retried: false }
+  hideBufferingChip()
+  clearStallSentinel()
+  try { player.reset?.() } catch {}
   player.src({ src, type: "application/x-mpegURL" })
-  player.play().catch(() => {})
+  const playResult = player.play?.()
+  if (playResult && typeof playResult.catch === "function") {
+    playResult.catch(() => {})
+  }
 
   pushDiscordPresence(channel || { id: streamId, name }, "live")
 
@@ -1683,36 +1990,117 @@ async function play(streamId, name) {
   } else {
     loadEPG(streamId)
   }
+}
 
-  document.getElementById("pip-btn")?.remove()
+let liveExternalBtnHandle: ExternalPlayerButtonHandle | null = null
+
+function appendExternalLaunchButton(parent, streamId, src, name) {
+  liveExternalBtnHandle?.dispose()
+  liveExternalBtnHandle = null
+
+  if (!parent || !externalPlayersAvailable) return
+
   const btn = document.createElement("button")
-  btn.id = "pip-btn"
-  btn.className = "min-h-11 px-3.5 rounded-xl border border-line bg-surface text-sm text-fg hover:bg-surface-2"
-  btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M19 4a3 3 0 0 1 3 3v4a1 1 0 0 1 -2 0v-4a1 1 0 0 0 -1 -1h-14a1 1 0 0 0 -1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 1 0 2h-6a3 3 0 0 1 -3 -3v-10a3 3 0 0 1 3 -3z"/><path d="M20 13a2 2 0 0 1 2 2v3a2 2 0 0 1 -2 2h-5a2 2 0 0 1 -2 -2v-3a2 2 0 0 1 2 -2z"/></svg>`
-  currentEl.appendChild(btn)
-  btn.addEventListener("click", () => togglePip(player))
+  btn.id = "external-launch-btn"
+  btn.type = "button"
+  btn.hidden = true
+  btn.className =
+    "shrink-0 inline-flex items-center justify-center gap-2 min-h-11 px-3.5 rounded-xl border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors"
+
+  const iconSpan = document.createElement("span")
+  iconSpan.className = "shrink-0 inline-flex text-xl leading-none"
+  iconSpan.setAttribute("aria-hidden", "true")
+  iconSpan.innerHTML = ICON_EXTERNAL_LINK
+
+  const labelSpan = document.createElement("span")
+  labelSpan.dataset.label = ""
+
+  btn.append(iconSpan, labelSpan)
+  parent.appendChild(btn)
+
+  liveExternalBtnHandle = setupExternalPlayerButton(btn, {
+    getSrc: () => src,
+    getHeaders: () => {
+      const channelHeaders = streamHeadersById.get(streamId) || null
+      return {
+        userAgent: channelHeaders?.userAgent || getUserAgent() || null,
+        referer: channelHeaders?.referer || null,
+      }
+    },
+    beforeLaunch: () => {
+      try { vjs?.pause?.() } catch {}
+    },
+  })
+}
+
+function showExternalPlayerEmptyState(backend, channelName) {
+  const empty = document.getElementById("player-empty")
+  if (!empty) return
+  const eyebrow = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
+  const title = empty.querySelector("[data-i18n='livetv.pickChannel'], [data-empty-title]") as HTMLElement | null
+  const helper = empty.querySelector("[data-i18n='livetv.pickChannelHelper'], [data-empty-helper]") as HTMLElement | null
+  if (eyebrow) {
+    eyebrow.textContent = backend.toUpperCase()
+    eyebrow.removeAttribute("data-i18n")
+  }
+  if (title) {
+    title.textContent = `Now playing in ${backend.toUpperCase()}`
+    title.removeAttribute("data-i18n")
+    title.dataset.emptyTitle = "external"
+  }
+  if (helper) {
+    helper.textContent = channelName || ""
+    helper.removeAttribute("data-i18n")
+    helper.dataset.emptyHelper = "external"
+  }
+}
+
+function resetEmptyState() {
+  const empty = document.getElementById("player-empty")
+  if (!empty) return
+  const eyebrow = empty.querySelector("span[data-empty-eyebrow], span:not([data-i18n])") as HTMLElement | null
+  const title = empty.querySelector("[data-empty-title]") as HTMLElement | null
+  const helper = empty.querySelector("[data-empty-helper]") as HTMLElement | null
+  if (title) {
+    title.setAttribute("data-i18n", "livetv.pickChannel")
+    title.textContent = t("livetv.pickChannel") || "Pick a channel."
+    delete title.dataset.emptyTitle
+  }
+  if (helper) {
+    helper.setAttribute("data-i18n", "livetv.pickChannelHelper")
+    helper.textContent = t("livetv.pickChannelHelper") || "Choose from the list, or change category."
+    delete helper.dataset.emptyHelper
+  }
+  // Eyebrow may still hold the backend name from a previous external launch.
+  const eyebrowI18n = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
+  if (eyebrowI18n) {
+    eyebrowI18n.textContent = t("livetv.idle") || "Idle"
+  } else if (eyebrow) {
+    eyebrow.setAttribute("data-i18n", "livetv.idle")
+    eyebrow.textContent = t("livetv.idle") || "Idle"
+  }
+}
+
+async function launchExternalLive(backend, src, channelHeaders) {
+  const launcher = getExternalLauncher(backend)
+  const ua = channelHeaders?.userAgent || getUserAgent() || null
+  const referer = channelHeaders?.referer || null
+  log.log(`[xt:livetv] external launch backend=${backend} url=${redactUrl(src)}`)
+  toast({
+    title: t("settings.playback.launching", { player: backend.toUpperCase() })
+      || `Launching ${backend.toUpperCase()}…`,
+    duration: 2000,
+  })
+  const result = await launcher.launch(src, { userAgent: ua, referer })
+  log.log(
+    `[xt:livetv] external launch result backend=${backend} pid=${result?.pid} reused=${result?.reused}`
+  )
 }
 
 // ----------------------------
 // EPG
 // ----------------------------
-const textDecoder = new TextDecoder("utf-8")
-
-function maybeB64ToUtf8(str) {
-  if (!str || typeof str !== "string") return str || ""
-  const looksB64 =
-    /^[A-Za-z0-9+/=\s]+$/.test(str) && str.replace(/\s+/g, "").length % 4 === 0
-  if (!looksB64) return str
-  try {
-    const bin = atob(str.replace(/\s+/g, ""))
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    const utf8 = textDecoder.decode(bytes)
-    return utf8.replace(/\s/g, "").length === 0 ? str : utf8
-  } catch {
-    return str
-  }
-}
+// maybeB64ToUtf8 + escapeHtml live in @/scripts/lib/b64-utf8.ts.
 
 const fmtTime = (ts) => {
   const n = Number(ts)
@@ -1726,15 +2114,6 @@ const fmtTime = (ts) => {
     return ""
   }
 }
-
-const escapeHtml = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[c])
 
 /** @type {Array<{ start:number, stop:number, title:string, desc:string }>} */
 let epgListData = []

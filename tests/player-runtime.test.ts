@@ -1,0 +1,177 @@
+import { describe, it, expect } from "vitest"
+import {
+  buildMpvArgs,
+  buildVlcArgs,
+  buildArgsFor,
+  classifyError,
+  PlayerLaunchError,
+  externalPlayersAvailable,
+} from "../src/scripts/lib/player-runtime"
+
+const SRC = "https://example.com/live/u/p/1.m3u8"
+
+describe("buildMpvArgs", () => {
+  it("emits required flags and src last with no optional inputs", () => {
+    const args = buildMpvArgs({ src: SRC })
+    expect(args).toEqual([
+      "--force-window=immediate",
+      "--no-terminal",
+      SRC,
+    ])
+  })
+
+  it("passes user-agent and referrer when supplied", () => {
+    const args = buildMpvArgs({
+      src: SRC,
+      userAgent: "Mozilla/5.0 Test",
+      referer: "https://example.com/",
+    })
+    expect(args).toContain("--user-agent=Mozilla/5.0 Test")
+    expect(args).toContain("--referrer=https://example.com/")
+    expect(args.at(-1)).toBe(SRC)
+  })
+
+  it("passes --start when resumeSeconds exceeds the threshold", () => {
+    const args = buildMpvArgs({ src: SRC, resumeSeconds: 90 })
+    expect(args).toContain("--start=90")
+  })
+
+  it("omits --start when resumeSeconds is below the threshold", () => {
+    const args = buildMpvArgs({ src: SRC, resumeSeconds: 3 })
+    expect(args.some((arg) => arg.startsWith("--start="))).toBe(false)
+  })
+
+  it("omits --start when resumeSeconds is missing or zero", () => {
+    expect(buildMpvArgs({ src: SRC }).some((a) => a.startsWith("--start="))).toBe(false)
+    expect(
+      buildMpvArgs({ src: SRC, resumeSeconds: 0 }).some((a) => a.startsWith("--start=")),
+    ).toBe(false)
+  })
+
+  it("respects a custom resumeMinSeconds", () => {
+    const args = buildMpvArgs({ src: SRC, resumeSeconds: 3, resumeMinSeconds: 1 })
+    expect(args).toContain("--start=3")
+  })
+
+  it("inserts user extra args before src", () => {
+    const args = buildMpvArgs({
+      src: SRC,
+      extraArgs: ["--hwdec=auto", "--cache-secs=20"],
+    })
+    expect(args.indexOf("--hwdec=auto")).toBeLessThan(args.indexOf(SRC))
+    expect(args.indexOf("--cache-secs=20")).toBeLessThan(args.indexOf(SRC))
+    expect(args.at(-1)).toBe(SRC)
+  })
+
+  it("never leaves null/undefined entries in argv", () => {
+    const args = buildMpvArgs({
+      src: SRC,
+      userAgent: null,
+      referer: null,
+      resumeSeconds: 0,
+      extraArgs: [],
+    })
+    expect(args.every((a) => typeof a === "string" && a.length > 0)).toBe(true)
+  })
+
+  it("filters out empty strings in extraArgs", () => {
+    const args = buildMpvArgs({ src: SRC, extraArgs: ["--hwdec=auto", ""] })
+    expect(args).toContain("--hwdec=auto")
+    expect(args).not.toContain("")
+  })
+
+  it("filters out whitespace-only strings in extraArgs", () => {
+    const args = buildMpvArgs({ src: SRC, extraArgs: ["--hwdec=auto", "   ", "\t"] })
+    expect(args).toContain("--hwdec=auto")
+    expect(args).not.toContain("   ")
+    expect(args).not.toContain("\t")
+  })
+})
+
+describe("buildVlcArgs", () => {
+  it("uses the VLC-flavored option names", () => {
+    const args = buildVlcArgs({
+      src: SRC,
+      userAgent: "Foo",
+      referer: "https://r.example/",
+      resumeSeconds: 120,
+    })
+    expect(args).toContain("--http-user-agent=Foo")
+    expect(args).toContain("--http-referrer=https://r.example/")
+    expect(args).toContain("--start-time=120")
+    expect(args.at(-1)).toBe(SRC)
+  })
+
+  it("includes --play-and-exit, --no-qt-error-dialogs, --no-fullscreen, --no-qt-minimal-view by default", () => {
+    const args = buildVlcArgs({ src: SRC })
+    expect(args).toContain("--play-and-exit")
+    expect(args).toContain("--no-qt-error-dialogs")
+    expect(args).toContain("--no-fullscreen")
+    expect(args).toContain("--no-qt-minimal-view")
+    expect(args).not.toContain("--no-video-title-show")
+  })
+
+  it("omits --start-time when resume below threshold", () => {
+    const args = buildVlcArgs({ src: SRC, resumeSeconds: 2 })
+    expect(args.some((a) => a.startsWith("--start-time="))).toBe(false)
+  })
+})
+
+describe("buildArgsFor", () => {
+  it("dispatches by kind", () => {
+    const mpv = buildArgsFor("mpv", { src: SRC, userAgent: "X" })
+    const vlc = buildArgsFor("vlc", { src: SRC, userAgent: "X" })
+    expect(mpv).toContain("--user-agent=X")
+    expect(vlc).toContain("--http-user-agent=X")
+  })
+})
+
+describe("classifyError", () => {
+  it("maps NOT_FOUND prefix and preserves kind/path", () => {
+    const err = classifyError("NOT_FOUND:no file at /usr/bin/mpv", "mpv", "/usr/bin/mpv")
+    expect(err).toBeInstanceOf(PlayerLaunchError)
+    expect(err.code).toBe("NOT_FOUND")
+    expect(err.kind).toBe("mpv")
+    expect(err.path).toBe("/usr/bin/mpv")
+    expect(err.message).toBe("NOT_FOUND:no file at /usr/bin/mpv")
+  })
+
+  it("maps PERMISSION prefix", () => {
+    const err = classifyError("PERMISSION:denied", "vlc", "/opt/vlc/vlc")
+    expect(err.code).toBe("PERMISSION")
+  })
+
+  it("maps TIMEOUT prefix", () => {
+    const err = classifyError("TIMEOUT:exceeded 2000ms", "mpv", "/x")
+    expect(err.code).toBe("TIMEOUT")
+  })
+
+  it("maps OTHER prefix", () => {
+    const err = classifyError("OTHER:join: child panicked", "vlc", "/y")
+    expect(err.code).toBe("OTHER")
+  })
+
+  it("falls back to OTHER for unrecognised prefixes", () => {
+    const err = classifyError("something else broke", "vlc", "/y")
+    expect(err.code).toBe("OTHER")
+    expect(err.message).toBe("something else broke")
+  })
+
+  it("unwraps Error instances by .message", () => {
+    const wrapped = new Error("PERMISSION:no exec bit")
+    const err = classifyError(wrapped, "mpv", "/z")
+    expect(err.code).toBe("PERMISSION")
+    expect(err.message).toBe("PERMISSION:no exec bit")
+  })
+
+  it("stringifies non-string non-Error rejections under OTHER", () => {
+    const err = classifyError({ unexpected: true }, "mpv", "/q")
+    expect(err.code).toBe("OTHER")
+  })
+})
+
+describe("externalPlayersAvailable gate", () => {
+  it("is false in the vitest node runtime, so mountPlayer falls back to videojs", () => {
+    expect(externalPlayersAvailable).toBe(false)
+  })
+})

@@ -25,9 +25,9 @@
 
 <p align="center">
   <a href="https://github.com/infinitel8p/Extreme-InfiniTV/releases/latest"><img src="https://img.shields.io/github/v/release/infinitel8p/Extreme-InfiniTV?label=latest&color=a855f7" alt="Latest release"/></a>
-  <a href="https://github.com/infinitel8p/Extreme-InfiniTV/releases"><img src="https://img.shields.io/github/downloads/infinitel8p/Extreme-InfiniTV/total?color=a855f7" alt="GitHub downloads"/></a>
+  <a href="https://github.com/infinitel8p/Extreme-InfiniTV/releases"><img src="https://img.shields.io/github/downloads/infinitel8p/Extreme-InfiniTV/total?color=a855f7&cacheSeconds=300" alt="GitHub downloads"/></a>
   <a href="https://github.com/infinitel8p/Extreme-InfiniTV/stargazers"><img src="https://img.shields.io/github/stars/infinitel8p/Extreme-InfiniTV?color=a855f7" alt="GitHub stars"/></a>
-  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-64748b" alt="Supported platforms: Windows, macOS, Linux, Android"/>
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-64748b?color=a855f7" alt="Supported platforms: Windows, macOS, Linux, Android"/>
 </p>
 
 ## Screenshots
@@ -113,14 +113,22 @@ Requirements: [pnpm](https://pnpm.io) (the package manager is pinned in `package
 ```bash
 pnpm install
 pnpm dev                  # Astro + Svelte at http://localhost:4321
-pnpm tauri dev            # Native Windows / desktop shell (auto-spawns pnpm dev)
+pnpm tauri dev            # Native desktop shell (auto-spawns pnpm dev)
 pnpm tauri:android        # Android dev shell
 ```
 
-The Astro dev server's HMR `host` is hardcoded to a LAN IP in `astro.config.mjs`. Update or remove that block if dev HMR fails on your machine.
+To test the dev server on another device on the LAN (phone, TV), set `XTREAM_HMR_HOST` to your machine's LAN IP so Vite advertises the right HMR host:
 
-There are no tests, linters, or formatters configured. TypeScript is in strict mode (`tsconfig.json` extends `astro/tsconfigs/strict`); the `@/*` alias maps to `src/*`.
+```bash
+XTREAM_HMR_HOST=192.168.1.50 pnpm dev
+```
+
+Tests run with Vitest (`pnpm test`); the suite covers pure-function libs in `tests/`. Lint with ESLint flat config (`pnpm lint` / `pnpm lint:fix`); no Prettier. TypeScript is in strict mode (`tsconfig.json` extends `astro/tsconfigs/strict`); the `@/*` alias maps to `src/*`.
 
 ## Credits
 
 Copyright (c) 2025 Ludovico Ferrara.
+
+## License
+
+Extreme InfiniTV is released under the [GNU General Public License v3.0 or later](LICENSE). You are free to use, study, share, and modify it; any distributed fork or derivative must remain under the same license and ship its source.

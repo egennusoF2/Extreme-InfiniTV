@@ -3,14 +3,25 @@ const KEY_DOWNLOAD_DIR = "xt_download_dir"
 const KEY_DOWNLOAD_CONCURRENCY = "xt_download_concurrency"
 const KEY_PERF_MODE = "xt_perf_mode"
 const KEY_PROGRESS_RETENTION = "xt_progress_retention_days"
+const KEY_PLAYER_BACKEND = "xt_player_backend"
+const KEY_PLAYER_PATH_MPV = "xt_player_path_mpv"
+const KEY_PLAYER_PATH_VLC = "xt_player_path_vlc"
+const KEY_PLAYER_ARGS_MPV = "xt_player_args_mpv"
+const KEY_PLAYER_ARGS_VLC = "xt_player_args_vlc"
+const KEY_PLAYER_REUSE_MPV = "xt_player_reuse_mpv"
+const KEY_PLAYER_REUSE_VLC = "xt_player_reuse_vlc"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
 export const PROGRESS_RETENTION_EVENT = "xt:progress-retention-changed"
+export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
 export const PROGRESS_RETENTION_VALUES = [30, 90, 180, 0]
 export const DEFAULT_PROGRESS_RETENTION_DAYS = 90
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1
 export const MAX_DOWNLOAD_CONCURRENCY = 4
+export const PLAYER_BACKENDS = ["artplayer", "videojs", "mpv", "vlc"]
+export const DEFAULT_PLAYER_BACKEND = "artplayer"
+export const EXTERNAL_PLAYER_BACKENDS = ["mpv", "vlc"]
 export const UA_PRESETS = [
   { id: "default", label: "Default (browser/WebView)", value: "" },
   {
@@ -207,3 +218,99 @@ export function isDiscordGloballyEnabled() {
 }
 
 export const SETTINGS_EVENT = EVT_CHANGED
+
+// ---------------------------------------------------------------------------
+// Player backend (desktop only - the picker UI hides on web/Android)
+// ---------------------------------------------------------------------------
+export function getPlayerBackend() {
+  const raw = readLS(KEY_PLAYER_BACKEND, "")
+  return PLAYER_BACKENDS.includes(raw) ? raw : DEFAULT_PLAYER_BACKEND
+}
+
+export function setPlayerBackend(backend) {
+  const next = PLAYER_BACKENDS.includes(backend) ? backend : DEFAULT_PLAYER_BACKEND
+  if (next === DEFAULT_PLAYER_BACKEND) writeLS(KEY_PLAYER_BACKEND, "")
+  else writeLS(KEY_PLAYER_BACKEND, next)
+  document.dispatchEvent(
+    new CustomEvent(PLAYER_BACKEND_EVENT, { detail: { value: next } })
+  )
+}
+
+function pathKeyFor(kind) {
+  if (kind === "mpv") return KEY_PLAYER_PATH_MPV
+  if (kind === "vlc") return KEY_PLAYER_PATH_VLC
+  return ""
+}
+
+function argsKeyFor(kind) {
+  if (kind === "mpv") return KEY_PLAYER_ARGS_MPV
+  if (kind === "vlc") return KEY_PLAYER_ARGS_VLC
+  return ""
+}
+
+function reuseKeyFor(kind) {
+  if (kind === "mpv") return KEY_PLAYER_REUSE_MPV
+  if (kind === "vlc") return KEY_PLAYER_REUSE_VLC
+  return ""
+}
+
+export function getPlayerPath(kind) {
+  const key = pathKeyFor(kind)
+  if (!key) return ""
+  return readLS(key, "")
+}
+
+export function setPlayerPath(kind, path) {
+  const key = pathKeyFor(kind)
+  if (!key) return
+  writeLS(key, (path || "").trim())
+  document.dispatchEvent(
+    new CustomEvent(EVT_CHANGED, { detail: { key: `playerPath:${kind}` } })
+  )
+}
+
+export function getPlayerExtraArgs(kind) {
+  const key = argsKeyFor(kind)
+  if (!key) return []
+  const raw = readLS(key, "")
+  if (!raw) return []
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+export function setPlayerExtraArgs(kind, args) {
+  const key = argsKeyFor(kind)
+  if (!key) return
+  let normalised = ""
+  if (Array.isArray(args)) {
+    normalised = args.map((line) => String(line).trim()).filter(Boolean).join("\n")
+  } else if (typeof args === "string") {
+    normalised = args
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join("\n")
+  }
+  writeLS(key, normalised)
+  document.dispatchEvent(
+    new CustomEvent(EVT_CHANGED, { detail: { key: `playerArgs:${kind}` } })
+  )
+}
+
+/** Reuse the same external player window across launches (MPV IPC / VLC RC). */
+export function getPlayerReuseInstance(kind) {
+  const key = reuseKeyFor(kind)
+  if (!key) return false
+  return readLS(key, "") === "1"
+}
+
+export function setPlayerReuseInstance(kind, on) {
+  const key = reuseKeyFor(kind)
+  if (!key) return
+  writeLS(key, on ? "1" : "")
+  document.dispatchEvent(
+    new CustomEvent(EVT_CHANGED, { detail: { key: `playerReuse:${kind}`, value: !!on } })
+  )
+}

@@ -48,6 +48,10 @@ import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { fmtImdbRating } from "@/scripts/lib/format.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
 import { t, initI18n } from "@/scripts/lib/i18n.js"
+import { mountPlayer, getExternalLauncher } from "@/scripts/lib/player-runtime.ts"
+import { getPlayerBackend } from "@/scripts/lib/app-settings.js"
+import { toast } from "@/scripts/lib/toast.js"
+import { setupExternalPlayerButton, surfaceLaunchError } from "@/scripts/lib/external-player-button.ts"
 
 const SERIES_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -427,6 +431,42 @@ function syncEpisodeDownloadButtons() {
 document.addEventListener(DOWNLOAD_PROGRESS_EVENT, syncEpisodeDownloadButtons)
 document.addEventListener(DOWNLOADS_LIST_EVENT, syncEpisodeDownloadButtons)
 
+function renderDownloadedEpisodes(downloads) {
+  const byKey = {}
+  for (const dl of downloads) {
+    const src = dl.source || {}
+    const seasonKey = String(src.season ?? "1")
+    const seriesName = src.seriesName || ""
+    const cleanedTitle = seriesName
+      ? String(dl.title || "")
+          .replace(`${seriesName} - `, "")
+          .replace(/^S\d+E\d+\s*-\s*/, "")
+      : (dl.title || "")
+    const extMatch = String(dl.url || "").match(/\.([a-z0-9]{2,5})(?:\?|$)/i)
+    const ep = {
+      id: src.id ?? null,
+      season: src.season ?? "1",
+      episode_num: src.episode ?? null,
+      title: cleanedTitle,
+      container_extension: extMatch?.[1] || "mp4",
+      _directUrl: dl.url,
+    }
+    ;(byKey[seasonKey] = byKey[seasonKey] || []).push(ep)
+  }
+  for (const k of Object.keys(byKey)) {
+    byKey[k].sort(
+      (a, b) => (Number(a.episode_num) || 0) - (Number(b.episode_num) || 0)
+    )
+  }
+  episodesByKey = byKey
+  const seasonKeys = Object.keys(byKey).sort((a, b) => Number(a) - Number(b))
+  if (!seasonKeys.includes(currentSeason)) {
+    currentSeason = seasonKeys[0] || ""
+  }
+  renderSeasonTabs(seasonKeys)
+  renderEpisodes()
+}
+
 function applySeriesInfo(data) {
   const info = data?.info || {}
   const seasons = Array.isArray(data?.seasons) ? data.seasons : []
@@ -593,36 +633,24 @@ function progressExtrasFor(ep) {
   }
 }
 
-async function ensurePlayer() {
+async function ensureEmbeddedPlayer(backend) {
   if (vjs) return vjs
-  const [{ default: videojs }] = await Promise.all([
-    import("video.js"),
-    import("video.js/dist/video-js.css"),
-  ])
+  const videoEl = document.getElementById("series-player")
+  if (!videoEl) return null
   const hasNativePipBridge = !!window.AndroidPip
-  vjs = videojs("series-player", {
+  const mounted = await mountPlayer(videoEl, backend, {
     liveui: false,
     fluid: true,
     preload: "auto",
     autoplay: false,
     aspectRatio: "16:9",
-    controlBar: {
-      volumePanel: { inline: false },
-      pictureInPictureToggle: !hasNativePipBridge,
-      playbackRateMenuButton: true,
-      subsCapsButton: true,
-      audioTrackButton: true,
-      fullscreenToggle: true,
-    },
-    html5: {
-      vhs: {
-        overrideNative: true,
-        limitRenditionByPlayerDimensions: true,
-        smoothQualityChange: true,
-      },
-    },
+    pictureInPictureToggle: !hasNativePipBridge,
   })
-  attachPlayerFocusKeeper(vjs)
+  if (mounted.kind !== "embedded") return null
+  vjs = mounted.handle
+  if (mounted.backend === "videojs") {
+    attachPlayerFocusKeeper(vjs)
+  }
   return vjs
 }
 
@@ -666,36 +694,57 @@ async function playEpisode(episode) {
       `S${episode.season || currentSeason}E${episode.episode_num || "?"} · ${episode.title || ""}`
   }
 
+  currentEpisode = episode
+  externalBtnHandle?.refresh()
+
+  const localSrc = await getLocalPlayableSrc(src)
+  const playSrc = localSrc || src
+  const saved = activePlaylistId
+    ? getProgress(activePlaylistId, "episode", episode.id)
+    : null
+  const resumePos =
+    saved && !saved.completed && saved.position > RESUME_MIN_SECONDS
+      ? (() => {
+          const dur = saved.duration || 0
+          if (dur === 0) return saved.position
+          return saved.position / dur < RESUME_MAX_FRACTION ? saved.position : 0
+        })()
+      : 0
+
+  const backend = getPlayerBackend()
+
+  if (backend === "mpv" || backend === "vlc") {
+    try {
+      await launchExternalPlayback(backend, playSrc, resumePos)
+    } catch (err) {
+      surfaceLaunchError(err, backend)
+    }
+    return
+  }
+
   if (posterEl) posterEl.classList.add("hidden")
   if (playerWrap) playerWrap.classList.remove("hidden")
   const videoEl = document.getElementById("series-player")
   videoEl?.removeAttribute("hidden")
 
-  const player = await ensurePlayer()
+  const player = await ensureEmbeddedPlayer(backend)
+  if (!player) return
   setupPipButton(player)
-  const localSrc = await getLocalPlayableSrc(src)
-  const playSrc = localSrc || src
   const mime = chooseMime(src)
   player.one("error", () => {
     const e = player.error()
-    log.error("[xt:series-detail] video.js error", {
+    log.error("[xt:series-detail] player error", {
       code: e?.code,
       message: e?.message,
       src: playSrc,
     })
   })
 
-  currentEpisode = episode
-
-  const saved = activePlaylistId
-    ? getProgress(activePlaylistId, "episode", episode.id)
-    : null
-  if (saved && !saved.completed && saved.position > RESUME_MIN_SECONDS) {
+  if (resumePos > 0) {
     player.one("loadedmetadata", () => {
-      const dur = player.duration() || saved.duration || 0
-      const pos = saved.position
-      if (dur === 0 || pos / dur < RESUME_MAX_FRACTION) {
-        try { player.currentTime(pos) } catch {}
+      const dur = player.duration?.() || saved?.duration || 0
+      if (dur === 0 || resumePos / dur < RESUME_MAX_FRACTION) {
+        try { player.currentTime?.(resumePos) } catch {}
       }
     })
   }
@@ -709,8 +758,8 @@ async function playEpisode(episode) {
       if (!activePlaylistId || !currentEpisode) return
       const now = Date.now()
       if (now - lastWriteAt < PROGRESS_WRITE_INTERVAL_MS) return
-      const pos = player.currentTime() || 0
-      const dur = player.duration() || 0
+      const pos = player.currentTime?.() || 0
+      const dur = player.duration?.() || 0
       if (pos < 1) return
       lastWriteAt = now
       setProgress(
@@ -724,7 +773,7 @@ async function playEpisode(episode) {
     })
     player.on("ended", () => {
       if (!activePlaylistId || !currentEpisode) return
-      const dur = player.duration() || 0
+      const dur = player.duration?.() || 0
       markCompleted(activePlaylistId, "episode", currentEpisode.id, {
         duration: dur,
         ...progressExtrasFor(currentEpisode),
@@ -734,9 +783,12 @@ async function playEpisode(episode) {
     })
   }
 
-  player.play().catch((err) =>
-    log.warn("[xt:series-detail] play() rejected:", err?.message || err)
-  )
+  const playResult = player.play?.()
+  if (playResult && typeof playResult.catch === "function") {
+    playResult.catch((err) =>
+      log.warn("[xt:series-detail] play() rejected:", err?.message || err)
+    )
+  }
 
   if (activePlaylistId && series) {
     setRichPresence({
@@ -751,6 +803,35 @@ async function playEpisode(episode) {
     })
   }
 }
+
+async function launchExternalPlayback(backend, src, resumeSeconds) {
+  const launcher = getExternalLauncher(backend)
+  toast({
+    title: t("settings.playback.launching", { player: backend.toUpperCase() })
+      || `Launching ${backend.toUpperCase()}…`,
+    duration: 2000,
+  })
+  await launcher.launch(src, { resumeSeconds })
+}
+
+const externalBtnHandle = setupExternalPlayerButton(
+  /** @type {HTMLButtonElement|null} */ (document.getElementById("series-detail-open-external")),
+  {
+    getSrc() {
+      if (!currentEpisode) return null
+      return buildEpisodeStreamUrl(currentEpisode) || null
+    },
+    getResumeSeconds() {
+      if (!activePlaylistId || !currentEpisode) return 0
+      const saved = getProgress(activePlaylistId, "episode", currentEpisode.id)
+      if (!saved || saved.completed) return 0
+      return saved.position > RESUME_MIN_SECONDS ? saved.position : 0
+    },
+    beforeLaunch() {
+      try { vjs?.pause?.() } catch {}
+    },
+  }
+)
 
 window.addEventListener("pagehide", () => {
   try {
@@ -1003,6 +1084,17 @@ function showError(msg) {
   if (plotEl) plotEl.textContent = msg
 }
 
+function showPlotLoading() {
+  if (!plotEl) return
+  plotEl.innerHTML =
+    '<span class="inline-flex items-center gap-2 text-fg-3">' +
+      '<svg viewBox="0 0 24 24" width="1rem" height="1rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="animate-spin">' +
+        '<path d="M21 12a9 9 0 1 1-6.2-8.55"/>' +
+      '</svg>' +
+      `<span>${escapeRatingText(t("detail.loading"))}</span>` +
+    '</span>'
+}
+
 async function boot() {
   await initI18n()
   if (!seriesId) {
@@ -1013,7 +1105,7 @@ async function boot() {
   series = null
   episodesByKey = null
   if (metaEl) metaEl.textContent = ""
-  if (plotEl) plotEl.textContent = t("detail.loading")
+  showPlotLoading()
   if (seasonTabs) seasonTabs.replaceChildren()
   if (episodeList) episodeList.replaceChildren()
 
@@ -1051,8 +1143,52 @@ async function boot() {
   syncWatchButton()
 
   const cached = getCached(active._id, `series_info_${seriesId}`)
-  if (cached) applySeriesInfo(cached.data)
-  else if (plotEl) plotEl.textContent = t("detail.loading")
+  if (cached) {
+    applySeriesInfo(cached.data)
+  } else {
+    // Optimistic render
+    if (seriesDownloads.length) renderDownloadedEpisodes(seriesDownloads)
+    showPlotLoading()
+  }
+
+  // Early autoplay handoff for downloaded episodes
+  if (
+    autoplayPending &&
+    autoplayEpisodeId &&
+    !cached &&
+    seriesDownloads.length
+  ) {
+    const dl = seriesDownloads.find(
+      (d) => Number(d.source?.id) === autoplayEpisodeId
+    )
+    if (dl) {
+      autoplayPending = false
+      try {
+        urlParams.delete("autoplay")
+        urlParams.delete("episode")
+        const next = urlParams.toString()
+        history.replaceState(
+          null,
+          "",
+          location.pathname + (next ? `?${next}` : "")
+        )
+      } catch {}
+      const extMatch = String(dl.url || "").match(/\.([a-z0-9]{2,5})(?:\?|$)/i)
+      const synthEp = {
+        id: autoplayEpisodeId,
+        season: dl.source.season ?? "1",
+        episode_num: dl.source.episode ?? null,
+        title: dl.source.seriesName
+          ? String(dl.title || "")
+              .replace(`${dl.source.seriesName} - `, "")
+              .replace(/^S\d+E\d+\s*-\s*/, "")
+          : "",
+        container_extension: extMatch?.[1] || "mp4",
+        _directUrl: dl.url,
+      }
+      playEpisode(synthEp)
+    }
+  }
 
   let infoOk = !!cached
   if (creds.host && creds.user && creds.pass) {
@@ -1076,21 +1212,21 @@ async function boot() {
             ? t("series.error.providerLocal")
             : t("series.error.failedDetails")
         }
-        if (episodeList) {
+        if (!seriesDownloads.length && episodeList) {
           episodeList.replaceChildren()
           const fail = document.createElement("div")
           fail.className = "text-fg-3 text-sm py-3"
-          fail.textContent = seriesDownloads.length
-            ? t("series.error.episodesOffline")
-            : t("series.error.cantLoadEpisodes")
+          fail.textContent = t("series.error.cantLoadEpisodes")
           episodeList.appendChild(fail)
         }
       }
     }
-  } else if (!cached && plotEl) {
-    plotEl.textContent = seriesDownloads.length
-      ? t("series.error.localPlayable")
-      : t("detail.error.noPlaylist")
+  } else if (!cached) {
+    if (plotEl) {
+      plotEl.textContent = seriesDownloads.length
+        ? t("series.error.localPlayable")
+        : t("detail.error.noPlaylist")
+    }
   }
 
   if (autoplayPending && autoplayEpisodeId && !infoOk) {

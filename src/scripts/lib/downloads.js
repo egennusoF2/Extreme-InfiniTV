@@ -39,7 +39,11 @@ function readState() {
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed : []
-  } catch {
+  } catch (e) {
+    log.warn(
+      "[xt:download] state parse failed - download queue dropped:",
+      e
+    )
     return []
   }
 }
@@ -47,7 +51,12 @@ function readState() {
 function writeState(list) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list))
-  } catch {}
+  } catch (e) {
+    log.warn(
+      "[xt:download] state persist failed - changes not saved:",
+      e
+    )
+  }
   document.dispatchEvent(new CustomEvent(EVT_LIST, { detail: list }))
 }
 
@@ -298,7 +307,7 @@ function joinPath(dir, name) {
 
 function updateItem(id, patch) {
   const list = readState()
-  const idx = list.findIndex((d) => d.id === id)
+  const idx = list.findIndex((item) => item.id === id)
   if (idx < 0) return
   list[idx] = { ...list[idx], ...patch }
   writeState(list)
@@ -308,7 +317,7 @@ function updateItem(id, patch) {
 }
 
 function getItem(id) {
-  return readState().find((d) => d.id === id) || null
+  return readState().find((item) => item.id === id) || null
 }
 
 async function runDownloadAndroid(id, item, controller) {
@@ -478,7 +487,7 @@ async function runDownload(id) {
       if (m) total = Number(m[1])
       else total = received + Number(res.headers.get("content-length") || 0)
     } else {
-      // Server didn't honor Range — restart from byte 0.
+      // Server didn't honor Range; restart from byte 0.
       if (received > 0) {
         await fs.writeFile(item.path, new Uint8Array(0))
         received = 0
@@ -701,7 +710,7 @@ export async function removeDownload(id) {
 
   const item = getItem(id)
 
-  const list = readState().filter((d) => d.id !== id)
+  const list = readState().filter((item) => item.id !== id)
   writeState(list)
 
   if (isTauri && item?.path) {
@@ -725,8 +734,64 @@ export async function removeDownload(id) {
 
 export function clearFinishedDownloads() {
   const inFlight = new Set(["downloading", "queued"])
-  const list = readState().filter((d) => inFlight.has(d.status))
+  const list = readState().filter((item) => inFlight.has(item.status))
   writeState(list)
+}
+
+/**
+ * Verify on-disk presence of every "done" entry
+ */
+export async function pruneMissingDownloads() {
+  if (!isTauri) return 0
+  const list = readState()
+  const dones = list.filter((item) => item.status === "done" && item.path)
+  if (!dones.length) return 0
+
+  let fs = null
+  try {
+    fs = await import("@tauri-apps/plugin-fs")
+  } catch {
+    return 0
+  }
+
+  const exists = async (path) => {
+    try {
+      if (AFs.isAndroidUri(path)) return await AFs.fileExists(path)
+      if (typeof fs.exists !== "function") return true
+      return await fs.exists(path)
+    } catch {
+      return true
+    }
+  }
+
+  const CONCURRENCY = 8
+  const missing = new Set()
+  let cursor = 0
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, dones.length) }, async () => {
+      while (cursor < dones.length) {
+        const item = dones[cursor++]
+        if (!(await exists(item.path))) missing.add(item.id)
+      }
+    })
+  )
+
+  if (!missing.size) return 0
+
+  const removedItems = list.filter((item) => missing.has(item.id))
+  const next = list.filter((item) => !missing.has(item.id))
+  writeState(next)
+
+  for (const item of removedItems) {
+    if (item.path && !AFs.isAndroidUri(item.path)) {
+      try { await removeMetaSidecar(item.path) } catch {}
+    }
+  }
+
+  log.log(
+    `[xt:download] pruned ${missing.size} missing file(s) from local state`
+  )
+  return missing.size
 }
 
 /**
@@ -1038,12 +1103,12 @@ function ensureThroughputTimer() {
 
 if (typeof document !== "undefined") {
   document.addEventListener(EVT_PROGRESS, () => {
-    if (readState().some((d) => d.status === "downloading")) {
+    if (readState().some((item) => item.status === "downloading")) {
       ensureThroughputTimer()
     }
   })
   document.addEventListener(EVT_LIST, () => {
-    if (readState().some((d) => d.status === "downloading")) {
+    if (readState().some((item) => item.status === "downloading")) {
       ensureThroughputTimer()
     }
   })

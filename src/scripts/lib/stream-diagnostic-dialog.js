@@ -181,6 +181,9 @@ function paint(report, opts) {
       } else if (summary.verdict === "warn") {
         verdictClass = "border-warn/40 bg-warn/5 text-warn"
         verdictText = t("streamTest.warn")
+      } else if (summary.verdict === "info") {
+        verdictClass = "border-accent/40 bg-accent-soft text-accent"
+        verdictText = t("streamTest.info") || "Info"
       } else {
         verdictClass = "border-bad/40 bg-bad/5 text-bad"
         verdictText = t("streamTest.unreachable")
@@ -197,11 +200,18 @@ function paint(report, opts) {
 
   const reportEl = node.querySelector("[data-role='report']")
   if (reportEl) {
-    reportEl.innerHTML = [
-      renderStage(t("streamTest.stage.endpoint"), renderHead(report?.head)),
-      renderStage(t("streamTest.stage.playlist"), renderPlaylist(report?.playlist)),
-      renderStage(t("streamTest.stage.firstSegment"), renderFirstSegment(report?.firstSegment)),
-    ].join("")
+    if (report?.nonHttp) {
+      // Non-HTTP streams (rtsp/rtmp/udp/...) can't be probed from a WebView
+      // - the endpoint / HLS / segment stages are all N/A. Hide the empty
+      // rows and just show the verdict.
+      reportEl.innerHTML = ""
+    } else {
+      reportEl.innerHTML = [
+        renderStage(t("streamTest.stage.endpoint"), renderHead(report?.head)),
+        renderStage(t("streamTest.stage.playlist"), renderPlaylist(report?.playlist)),
+        renderStage(t("streamTest.stage.firstSegment"), renderFirstSegment(report?.firstSegment)),
+      ].join("")
+    }
   }
 }
 

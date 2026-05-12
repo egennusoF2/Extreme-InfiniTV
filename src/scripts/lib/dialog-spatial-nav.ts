@@ -18,6 +18,51 @@ function resumeMainSection() {
     }
 }
 
+interface SectionOpts {
+    id: string
+    selector: string
+    defaultElement?: string
+    focusOnRegister?: HTMLElement | null
+}
+
+// Shared registration core used by both <dialog> and popover wrappers.
+// Returns register/unregister handles plus the refcount-safe main-section
+// suspend that all overlay surfaces want.
+function makeSectionHandle(opts: SectionOpts) {
+    let registered = false
+
+    const register = () => {
+        const SN = window.SpatialNavigation
+        if (!SN || registered) return
+        try {
+            SN.add({
+                id: opts.id,
+                selector: opts.selector,
+                restrict: "self-only",
+                enterTo: "default-element",
+                defaultElement: opts.defaultElement || opts.selector,
+            })
+        } catch {
+            return
+        }
+        registered = true
+        suspendMainSection()
+        SN.makeFocusable?.()
+    }
+
+    const unregister = () => {
+        const SN = window.SpatialNavigation
+        if (!SN || !registered) return
+        try {
+            SN.remove(opts.id)
+        } catch {}
+        registered = false
+        resumeMainSection()
+    }
+
+    return { register, unregister }
+}
+
 interface AttachOpts {
     id?: string
     selector?: string
@@ -37,29 +82,14 @@ export function attachDialogSpatialNav(
             .map((s) => `#${dlg.id} ${s.trim()}`)
             .join(", ")
 
-    let registered = false
+    const { register, unregister } = makeSectionHandle({
+        id: sectionId,
+        selector,
+        defaultElement: opts.defaultElement,
+    })
 
-    const register = () => {
-        const SN = window.SpatialNavigation
-        if (!SN || registered) return
-        // Suspend the main section *only* after a successful SN.add. If add
-        // throws (duplicate id, bad selector), bail without touching the
-        // refcount so the page stays navigable.
-        try {
-            SN.add({
-                id: sectionId,
-                selector,
-                restrict: "self-only",
-                enterTo: "default-element",
-                defaultElement: opts.defaultElement || selector,
-            })
-        } catch {
-            return
-        }
-        registered = true
-        suspendMainSection()
-        SN.makeFocusable?.()
-
+    const registerWithFocus = () => {
+        register()
         const active = document.activeElement
         if (!active || !dlg.contains(active)) {
             const target =
@@ -71,28 +101,56 @@ export function attachDialogSpatialNav(
         }
     }
 
-    const unregister = () => {
-        const SN = window.SpatialNavigation
-        if (!SN || !registered) return
-        try {
-            SN.remove(sectionId)
-        } catch {}
-        registered = false
-        resumeMainSection()
-    }
-
     const observer = new MutationObserver(() => {
-        if (dlg.hasAttribute("open")) register()
+        if (dlg.hasAttribute("open")) registerWithFocus()
         else unregister()
     })
     observer.observe(dlg, { attributes: true, attributeFilter: ["open"] })
     dlg.addEventListener("close", unregister)
 
-    if (dlg.hasAttribute("open")) register()
+    if (dlg.hasAttribute("open")) registerWithFocus()
 
     return () => {
         observer.disconnect()
         dlg.removeEventListener("close", unregister)
         unregister()
+    }
+}
+
+interface PopoverOpts {
+    /** Spatial-nav section id. Required - no element id to derive from. */
+    id: string
+    /** CSS selector for focusable items inside the popover. */
+    selector: string
+    /** Optional default element selector for enterTo. */
+    defaultElement?: string
+}
+
+interface PopoverHandle {
+    /** Call when the popover becomes visible. */
+    open: () => void
+    /** Call when the popover hides. Safe to call repeatedly. */
+    close: () => void
+    /** Same as close - call on component unmount. */
+    teardown: () => void
+}
+
+/**
+ * Spatial-nav wrapper for non-<dialog> popovers / floating menus. Mirrors
+ * attachDialogSpatialNav: registers a self-only section, suspends the
+ * shared "main" section via the same refcount, and exposes explicit
+ * open/close calls (since plain elements don't have a standard "open"
+ * attribute or close event we can observe).
+ */
+export function attachPopoverSpatialNav(opts: PopoverOpts): PopoverHandle {
+    const { register, unregister } = makeSectionHandle({
+        id: opts.id,
+        selector: opts.selector,
+        defaultElement: opts.defaultElement,
+    })
+    return {
+        open: register,
+        close: unregister,
+        teardown: unregister,
     }
 }

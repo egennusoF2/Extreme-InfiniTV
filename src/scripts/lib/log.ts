@@ -30,3 +30,17 @@ export const log: {
     debug: isDev ? console.debug.bind(console) : noop,
     log: isDev ? console.log.bind(console) : noop,
 }
+
+const SENSITIVE_PARAMS = /(\b(?:username|user|password|pass|token|auth|key|api_key|apikey)=)([^&#\s]*)/gi
+
+/**
+ * Strip credential-looking query params from any URL or URL-bearing string
+ * before it goes to log.error / log.warn. `log.error` is unconditional in
+ * production builds (see `error` above) and Xtream URLs typically embed
+ * username + password.
+ */
+export function redactUrl(input: unknown): string {
+    if (input == null) return ""
+    const text = typeof input === "string" ? input : String(input)
+    return text.replace(SENSITIVE_PARAMS, (_match, prefix) => `${prefix}***`)
+}

@@ -174,6 +174,135 @@ export async function convertSrc(uri) {
 }
 
 /**
+ * Open the system file picker for an M3U / M3U8 playlist and read its
+ * contents as UTF-8 text. `maxBytes` is checked via getByteLength before
+ * the file is read into WebView memory, so picking a multi-GB file no
+ * longer OOMs the renderer.
+ *
+ * @param {{ maxBytes?: number }} [opts]
+ * @returns {Promise<{text: string, name: string, size: number, oversize?: boolean} | null>}
+ *          null if the user cancelled or the plugin isn't available;
+ *          `oversize: true` if the file exceeded `maxBytes`.
+ */
+export async function pickM3UFile(opts = {}) {
+  const m = await mod()
+  if (!m) return null
+  const uris = await m.AndroidFs.showOpenFilePicker({
+    mimeTypes: [
+      "audio/x-mpegurl",
+      "application/vnd.apple.mpegurl",
+      "application/x-mpegurl",
+      "text/plain",
+      "application/octet-stream",
+      "*/*",
+    ],
+    multiple: false,
+  })
+  const uri = Array.isArray(uris) ? uris[0] : null
+  if (!uri) return null
+  let name = ""
+  try {
+    name = (await m.AndroidFs.getName(uri)) || ""
+  } catch {}
+  let size = 0
+  try {
+    size = Number(await m.AndroidFs.getByteLength(uri)) || 0
+  } catch {}
+  const maxBytes = typeof opts.maxBytes === "number" && opts.maxBytes > 0 ? opts.maxBytes : 0
+  if (maxBytes && size > maxBytes) {
+    return { text: "", name, size, oversize: true }
+  }
+  const text = await m.AndroidFs.readTextFile(uri)
+  return { text, name, size: size || text.length }
+}
+
+/**
+ * Open the system file picker and read the picked file as UTF-8 text.
+ * @returns {Promise<{text: string, name: string} | null>} null if the user
+ *          cancelled or the plugin isn't available.
+ */
+export async function pickJsonFile() {
+  const m = await mod()
+  if (!m) return null
+  const uris = await m.AndroidFs.showOpenFilePicker({
+    mimeTypes: [
+      "application/json",
+      "text/json",
+      "text/plain",
+      "application/octet-stream",
+      "*/*",
+    ],
+    multiple: false,
+  })
+  const uri = Array.isArray(uris) ? uris[0] : null
+  if (!uri) return null
+  let name = ""
+  try {
+    name = (await m.AndroidFs.getName(uri)) || ""
+  } catch {}
+  const text = await m.AndroidFs.readTextFile(uri)
+  return { text, name }
+}
+
+/**
+ * Open the system "Save As" picker and write `text` (UTF-8) to the chosen destination.
+ * @returns true if the file was written, false if the user cancelled or
+ *          the plugin isn't available.
+ */
+export async function saveJsonFile(defaultFileName, text) {
+  const m = await mod()
+  if (!m) return false
+  const uri = await m.AndroidFs.showSaveFilePicker(
+    defaultFileName,
+    "application/json"
+  )
+  if (!uri) return false
+  const bytes = new TextEncoder().encode(text)
+  await m.AndroidFs.writeFile(uri, bytes)
+  return true
+}
+
+/**
+ * Drop a JSON file directly into the public Downloads/Extreme InfiniTV/
+ * folder via MediaStore. No picker UI - used as a fallback when the SAF
+ * "Save As" picker is unavailable on the device.
+ *
+ * @returns the on-device path (best effort) or the URI string of the
+ *          written file, or null if the plugin isn't available.
+ */
+export async function savePublicJsonFile(filename, text) {
+  const m = await mod()
+  if (!m) return null
+  const uri = await m.AndroidFs.createNewPublicFile(
+    m.AndroidPublicGeneralPurposeDir.Download,
+    `${PUBLIC_SUBDIR}/${filename}`,
+    "application/json",
+    { isPending: true }
+  )
+  if (!uri) return null
+  const bytes = new TextEncoder().encode(text)
+  try {
+    await m.AndroidFs.writeFile(uri, bytes)
+  } catch (e) {
+    try {
+      await m.AndroidFs.removeFile(uri)
+    } catch {}
+    throw e
+  }
+  try {
+    await m.AndroidFs.setPublicFilePending(uri, false)
+  } catch (e) {
+    log.warn("[xt:android-fs] setPublicFilePending(false) failed:", e)
+  }
+  try {
+    await m.AndroidFs.scanPublicFile(uri)
+  } catch (e) {
+    log.warn("[xt:android-fs] scanPublicFile failed:", e)
+  }
+  return `Download/${PUBLIC_SUBDIR}/${filename}`
+}
+
+/**
  * Hand the URI off to Android's system "Open with..." chooser via
  * Intent.ACTION_VIEW. The user picks VLC / MX Player / native gallery / etc.
  * In-WebView local-file playback is broken on Android in current Tauri 2

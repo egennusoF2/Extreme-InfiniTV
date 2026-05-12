@@ -39,8 +39,9 @@ const tabItems = [
 const moreItems = [
   { href: "/favorites",      key: "nav.favorites",     label: "Favorites",      Icon: IconStar,     match: (p) => p === "/favorites" || p.startsWith("/favorites/") },
   { href: "/watchlist",      key: "nav.watchlist",     label: "Watchlist",      Icon: IconBookmark, match: (p) => p === "/watchlist" || p.startsWith("/watchlist/") },
-  { href: "/recently-added", key: "nav.recentlyAdded", label: "Recently added", Icon: IconSparkles, match: (p) => p === "/recently-added" || p.startsWith("/recently-added/") },
-  { href: "/downloads",      key: "nav.downloads",     label: "Downloads",      Icon: IconDownload, match: (p) => p === "/downloads" || p.startsWith("/downloads/"), id: "mobile-more-downloads" },
+  { href: "/recently-added", key: "nav.recentlyAdded", label: "Recently added", Icon: IconSparkles,     match: (p) => p === "/recently-added" || p.startsWith("/recently-added/") },
+  { href: "/epg",            key: "nav.epg",           label: "EPG",            Icon: IconCalendarTime, match: (p) => p === "/epg" || p.startsWith("/epg/") },
+  { href: "/downloads",      key: "nav.downloads",     label: "Downloads",      Icon: IconDownload,     match: (p) => p === "/downloads" || p.startsWith("/downloads/"), id: "mobile-more-downloads" },
   { href: "/settings",       key: "nav.settings",      label: "Settings",       Icon: IconSettings, match: (p) => p === "/settings"  || p.startsWith("/settings/") },
 ]
 
@@ -59,7 +60,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
          landscape-phone:sticky landscape-phone:top-0
          landscape-phone:h-dvh landscape-phone:overflow-y-auto
          custom-scroll
-         landscape-phone:[scrollbar-width:none]
+         landscape-phone:scrollbar-none
          landscape-phone:[&::-webkit-scrollbar]:hidden">
 
   <a
@@ -67,7 +68,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     aria-label="Extreme InfiniTV - Home"
     data-i18n-attr="aria-label:sidebar.brandHome"
     class="brand-mark group [view-transition-name:brand-mark]
-           flex items-center gap-3 px-2 py-2
+           hidden lg:flex items-center gap-3 px-2 py-2
            justify-center lg:justify-start outline-none">
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -82,36 +83,12 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
         class="brand-mark__base"
         d="M18.1777 8C23.2737 8 23.2737 16 18.1777 16C13.0827 16 11.0447 8 5.43875 8C0.85375 8 0.85375 16 5.43875 16C11.0447 16 13.0828 8 18.1788 8H18.1777Z" />
       <g class="brand-mark__trail">
-        <circle r="1.15" fill="currentColor" opacity="1">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
-        <circle r="0.95" fill="currentColor" opacity="0.75">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0.08s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
-        <circle r="0.8" fill="currentColor" opacity="0.55">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0.16s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
-        <circle r="0.65" fill="currentColor" opacity="0.4">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0.24s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
-        <circle r="0.5" fill="currentColor" opacity="0.25">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0.32s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
-        <circle r="0.35" fill="currentColor" opacity="0.14">
-          <animateMotion dur="6s" repeatCount="indefinite" begin="0.4s">
-            <mpath href="#brand-mark-path" />
-          </animateMotion>
-        </circle>
+        <circle r="1.15" fill="currentColor" opacity="1"    class="brand-mark__dot brand-mark__dot--1" />
+        <circle r="0.95" fill="currentColor" opacity="0.75" class="brand-mark__dot brand-mark__dot--2" />
+        <circle r="0.8"  fill="currentColor" opacity="0.55" class="brand-mark__dot brand-mark__dot--3" />
+        <circle r="0.65" fill="currentColor" opacity="0.4"  class="brand-mark__dot brand-mark__dot--4" />
+        <circle r="0.5"  fill="currentColor" opacity="0.25" class="brand-mark__dot brand-mark__dot--5" />
+        <circle r="0.35" fill="currentColor" opacity="0.14" class="brand-mark__dot brand-mark__dot--6" />
       </g>
     </svg>
     <span class="hidden lg:inline-flex items-baseline truncate text-[0.9375rem] tracking-[-0.02em]">
@@ -271,6 +248,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     id="mobile-more-panel"
     data-open="false"
     aria-hidden="true"
+    inert
     class="absolute bottom-full inset-x-0 z-10
            border-t border-line bg-bg/95 backdrop-blur-md
            shadow-[0_-12px_32px_-16px_rgba(0,0,0,0.45)]
@@ -606,6 +584,8 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
     moreBtn.setAttribute("aria-expanded", open ? "true" : "false")
     morePanel.dataset.open = open ? "true" : "false"
     morePanel.setAttribute("aria-hidden", open ? "false" : "true")
+    if (open) morePanel.removeAttribute("inert")
+    else morePanel.setAttribute("inert", "")
   }
 
   moreBtn?.addEventListener("click", (ev) => {
@@ -666,6 +646,21 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
   @keyframes brand-mark-trail-show {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+
+  .brand-mark__dot {
+    offset-path: path('M18.1777 8C23.2737 8 23.2737 16 18.1777 16C13.0827 16 11.0447 8 5.43875 8C0.85375 8 0.85375 16 5.43875 16C11.0447 16 13.0828 8 18.1788 8H18.1777Z');
+    offset-rotate: 0deg;
+    offset-distance: 0%;
+    animation: brand-mark-orbit 6s linear infinite;
+  }
+  .brand-mark__dot--2 { animation-delay: 0.08s; }
+  .brand-mark__dot--3 { animation-delay: 0.16s; }
+  .brand-mark__dot--4 { animation-delay: 0.24s; }
+  .brand-mark__dot--5 { animation-delay: 0.32s; }
+  .brand-mark__dot--6 { animation-delay: 0.40s; }
+  @keyframes brand-mark-orbit {
+    to { offset-distance: 100%; }
   }
 
   .brand-mark:hover .brand-mark__base,

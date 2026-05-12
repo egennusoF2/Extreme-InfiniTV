@@ -8,6 +8,7 @@ import {
   IconBookmark,
   IconBrandYoutube,
   IconPictureInPicture,
+  IconExternalLink,
 } from "@tabler/icons-svelte"
 ---
 
@@ -123,6 +124,16 @@ import {
                    active:scale-[0.97] transition duration-150">
             <IconPictureInPicture aria-hidden="true" stroke={2} class="size-5" />
             <span data-i18n="detail.action.pip">Picture-in-Picture</span>
+          </button>
+          <button
+            id="movie-detail-open-external"
+            type="button"
+            hidden
+            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
+                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
+                   active:scale-[0.97] transition duration-150">
+            <IconExternalLink aria-hidden="true" stroke={2} class="size-5" />
+            <span data-label></span>
           </button>
           <button
             id="movie-detail-trailer"

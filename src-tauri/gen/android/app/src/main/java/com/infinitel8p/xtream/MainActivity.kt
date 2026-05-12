@@ -7,15 +7,76 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebSettings
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.OnBackPressedCallback
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import android.app.PictureInPictureParams
+import android.util.Log
 import android.util.Rational
 import android.os.Build
 import android.webkit.JavascriptInterface
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebViewClient
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
+import app.tauri.plugin.PluginManager
+import java.util.concurrent.atomic.AtomicBoolean
+
+@RequiresApi(Build.VERSION_CODES.O)
+private class RenderGoneGuardingClient(
+  private val delegate: WebViewClient,
+  private val onRenderGone: (WebView, RenderProcessGoneDetail) -> Unit,
+) : WebViewClient() {
+  override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+    delegate.shouldInterceptRequest(view, request)
+
+  override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+    delegate.shouldOverrideUrlLoading(view, request)
+
+  override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+    delegate.onPageStarted(view, url, favicon)
+  }
+
+  override fun onPageFinished(view: WebView, url: String) {
+    delegate.onPageFinished(view, url)
+  }
+
+  override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+    delegate.onReceivedError(view, request, error)
+  }
+
+  override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+    onRenderGone(view, detail)
+    return true
+  }
+}
+
+// wry's RustWebChromeClient.onShowCustomView calls callback.onCustomViewHidden()
+// and returns immediately, declining to host the HTML5 fullscreen custom view.
+// We replace it with this plain subclass that actually attaches the SurfaceView
+// to the activity decor, which is what `<video>`.requestFullscreen() needs.
+private class FullscreenAwareChromeClient(
+  private val onShow: (View, CustomViewCallback) -> Unit,
+  private val onHide: () -> Unit,
+) : WebChromeClient() {
+  override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+    onShow(view, callback)
+  }
+
+  override fun onHideCustomView() {
+    onHide()
+  }
+}
 
 class StatusBarBridge(private val activity: TauriActivity) {
   @JavascriptInterface
@@ -40,6 +101,22 @@ class WebSettingsBridge(
       webViewRef()?.settings?.userAgentString = target
     }
   }
+}
+
+class DeviceInfoBridge(private val activity: TauriActivity) {
+  @JavascriptInterface
+  fun isLeanback(): Boolean =
+    activity.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+  @JavascriptInterface
+  fun isTelevisionUiMode(): Boolean {
+    val uiMode = activity.resources.configuration.uiMode and
+      Configuration.UI_MODE_TYPE_MASK
+    return uiMode == Configuration.UI_MODE_TYPE_TELEVISION
+  }
+
+  @JavascriptInterface
+  fun isTv(): Boolean = isLeanback() || isTelevisionUiMode()
 }
 
 class PipBridge(private val activity: TauriActivity) {
@@ -90,9 +167,28 @@ class MainActivity : TauriActivity() {
   // Cached so the back-press handler can call onHideCustomView without re-walking the view tree.
   private var hostedWebView: WebView? = null
 
+  private val rendererRecreating = AtomicBoolean(false)
+
+  companion object {
+    private const val RENDER_GONE_REPEAT_WINDOW_MS = 60_000L
+    @Volatile
+    private var lastRenderGoneAt: Long = 0L
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
+    // installSplashScreen() must run before super.onCreate so Theme.App.Starting
+    // can hand control back to Theme.app once the WebView is ready to paint.
+    installSplashScreen()
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+
+    // Nothing in Tauri 2.11 calls PluginManager.onActivityCreate() automatically,
+    // so SAF pickers (tauri-plugin-android-fs, tauri-plugin-dialog) otherwise
+    // throw "lateinit property startActivityForResultLauncher has not been
+    // initialized". Re-bind on every onCreate so the launchers also survive
+    // recreate() after a WebView render-process-gone restart, where the
+    // singleton's lateinit still points at the dead activity.
+    bindPluginManagerLaunchers()
 
     // Back button exits fullscreen first, then falls back to default behavior.
     onBackPressedDispatcher.addCallback(
@@ -110,6 +206,74 @@ class MainActivity : TauriActivity() {
     )
   }
 
+  private fun bindPluginManagerLaunchers() {
+    val pm = PluginManager
+    pm.activity = this
+    val pmClass = pm.javaClass
+
+    fun rebind(fieldName: String, callbackFieldName: String, launcher: Any) {
+      try {
+        pmClass.getDeclaredField(fieldName).apply {
+          isAccessible = true
+          set(pm, launcher)
+        }
+      } catch (e: Throwable) {
+        Log.e("xtream-rs", "PluginManager.$fieldName rebind failed: $e")
+      }
+    }
+
+    try {
+      val saLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("startActivityForResultCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.ActivityResultCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "startActivityForResult callback dispatch failed: $e")
+        }
+      }
+      rebind("startActivityForResultLauncher", "startActivityForResultCallback", saLauncher)
+
+      val isLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("startIntentSenderForResultCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.ActivityResultCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "startIntentSenderForResult callback dispatch failed: $e")
+        }
+      }
+      rebind("startIntentSenderForResultLauncher", "startIntentSenderForResultCallback", isLauncher)
+
+      val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+      ) { result ->
+        try {
+          val cbField = pmClass.getDeclaredField("requestPermissionsCallback").apply {
+            isAccessible = true
+          }
+          (cbField.get(pm) as? PluginManager.RequestPermissionsCallback)?.onResult(result)
+        } catch (e: Throwable) {
+          Log.w("xtream-rs", "requestPermissions callback dispatch failed: $e")
+        }
+      }
+      rebind("requestPermissionsLauncher", "requestPermissionsCallback", permLauncher)
+    } catch (e: Throwable) {
+      Log.e("xtream-rs", "bindPluginManagerLaunchers reflection path failed, trying official init", e)
+      try {
+        PluginManager.onActivityCreate(this)
+      } catch (e2: Throwable) {
+        Log.e("xtream-rs", "PluginManager.onActivityCreate fallback also failed", e2)
+      }
+    }
+  }
+
   // See https://github.com/tauri-apps/tauri/issues/13049.
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
@@ -117,42 +281,87 @@ class MainActivity : TauriActivity() {
 
     webView.addJavascriptInterface(PipBridge(this), "AndroidPip")
     webView.addJavascriptInterface(StatusBarBridge(this), "AndroidStatusBar")
+    webView.addJavascriptInterface(DeviceInfoBridge(this), "AndroidDeviceInfo")
     webView.addJavascriptInterface(
       WebSettingsBridge(this, { hostedWebView }, webView.settings.userAgentString),
       "AndroidWebSettings"
     )
-    WebView.setWebContentsDebuggingEnabled(true)
+    val isDebuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    WebView.setWebContentsDebuggingEnabled(isDebuggable)
+
+    // Keep the renderer process from being reclaimed under TV / low-RAM
+    // pressure. Default WAIVED is what triggers most renderer-gone crashes
+    // on cheap Android TV boxes.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+    }
 
     webView.settings.javaScriptEnabled = true
     webView.settings.setSupportMultipleWindows(true)
     webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
     webView.settings.mediaPlaybackRequiresUserGesture = false
 
-    webView.webChromeClient = object : WebChromeClient() {
-      override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      webView.post {
+        val tauriClient = webView.webViewClient
+        webView.webViewClient = RenderGoneGuardingClient(tauriClient) { deadView, detail ->
+          if (!rendererRecreating.compareAndSet(false, true)) {
+            return@RenderGoneGuardingClient
+          }
+          val now = System.currentTimeMillis()
+          val sinceLast = now - lastRenderGoneAt
+          lastRenderGoneAt = now
+          val didCrash = detail.didCrash()
+          val isRepeat = sinceLast in 1..RENDER_GONE_REPEAT_WINDOW_MS
+          Log.w(
+            "xtream-rs",
+            "WebView render process gone (didCrash=$didCrash, priority=${detail.rendererPriorityAtExit()}, sinceLast=${sinceLast}ms, repeat=$isRepeat)"
+          )
+          val messageRes = when {
+            isRepeat -> R.string.render_gone_repeat
+            didCrash -> R.string.render_gone_crash
+            else -> R.string.render_gone_oom
+          }
+          Toast.makeText(applicationContext, messageRes, Toast.LENGTH_LONG).show()
+          hostedWebView = null
+          fullscreenView = null
+          fullscreenCallback = null
+          (deadView.parent as? ViewGroup)?.removeView(deadView)
+          deadView.destroy()
+          if (isRepeat) {
+            return@RenderGoneGuardingClient
+          }
+          if (!isFinishing && !isDestroyed) {
+            recreate()
+          }
+        }
+      }
+    }
+
+    webView.webChromeClient = FullscreenAwareChromeClient(
+      onShow = { view, callback ->
         if (fullscreenView != null) {
           callback.onCustomViewHidden()
-          return
-        }
-        fullscreenView = view
-        fullscreenCallback = callback
+        } else {
+          fullscreenView = view
+          fullscreenCallback = callback
 
-        val decor = window.decorView as FrameLayout
-        originalSystemUi = decor.systemUiVisibility
-        decor.addView(
-          view,
-          FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
+          val decor = window.decorView as FrameLayout
+          originalSystemUi = decor.systemUiVisibility
+          decor.addView(
+            view,
+            FrameLayout.LayoutParams(
+              ViewGroup.LayoutParams.MATCH_PARENT,
+              ViewGroup.LayoutParams.MATCH_PARENT
+            )
           )
-        )
-        decor.systemUiVisibility =
-          (View.SYSTEM_UI_FLAG_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-      }
-
-      override fun onHideCustomView() {
+          decor.systemUiVisibility =
+            (View.SYSTEM_UI_FLAG_FULLSCREEN
+              or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+              or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        }
+      },
+      onHide = {
         val decor = window.decorView as FrameLayout
         fullscreenView?.let { decor.removeView(it) }
         decor.systemUiVisibility = originalSystemUi
@@ -160,7 +369,7 @@ class MainActivity : TauriActivity() {
         fullscreenView = null
         fullscreenCallback = null
       }
-    }
+    )
   }
 
   override fun onUserLeaveHint() {
@@ -175,5 +384,12 @@ class MainActivity : TauriActivity() {
 
   override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+    // wry 0.55+ pauses the WebView in WryActivity.onPause() (wry 0.53/0.54 did
+    // not). Android transitions the activity through onPause() into PiP and keeps
+    // it paused for the whole PiP session, so without this resume the WebView
+    // renderer stays frozen and the overlay renders black.
+    if (isInPictureInPictureMode) {
+      hostedWebView?.onResume()
+    }
   }
 }

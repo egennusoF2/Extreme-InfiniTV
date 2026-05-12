@@ -30,10 +30,12 @@ import {
   IconInfoCircle,
   IconSparkles,
   IconBolt,
+  IconPlayerPlay,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
 import FavoritesReorder from "@/components/FavoritesReorder.svelte"
+import PlayerPicker from "@/components/PlayerPicker.svelte"
 ---
 
 <Layout pageTitle="Settings">
@@ -57,15 +59,15 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
           class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden">
           <div data-i18n="settings.playlists.empty" class="px-4 py-4 text-xs text-fg-3">No playlists yet.</div>
         </div>
-        <div class="flex flex-wrap gap-2 pt-1">
-          <a href="/login" class="btn">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <a href="/login" class="btn justify-start sm:justify-center">
             <IconPlus aria-hidden="true" class="btn-icon" />
             <span data-i18n="playlist.add">Add playlist</span>
           </a>
           <button
             id="settings-refresh-active"
             type="button"
-            class="btn hidden">
+            class="btn justify-start sm:justify-center hidden">
             <IconRefresh aria-hidden="true" class="btn-icon" />
             <span data-i18n="playlist.refreshActive">Refresh active</span>
           </button>
@@ -112,7 +114,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.theme.label" class="text-eyebrow font-medium uppercase text-fg-3">Theme</span>
             <div
               id="settings-theme"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-3 gap-2"
               role="radiogroup"
               data-i18n-attr="aria-label:settings.theme.label"
               aria-label="Theme">
@@ -129,7 +131,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             </p>
             <div
               id="settings-font-scale"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-2 sm:grid-cols-4 gap-2"
               role="radiogroup"
               data-i18n-attr="aria-label:settings.fontScale.label"
               aria-label="Font scale">
@@ -180,7 +182,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.perfMode.label" class="text-eyebrow font-medium uppercase text-fg-3">Performance mode</span>
             <div
               id="settings-perf-mode"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-2 gap-2"
               role="radiogroup"
               aria-label="Performance mode"
               data-i18n-attr="aria-label:settings.perfMode.label">
@@ -221,7 +223,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.livetvLayout.epgDefault" class="text-eyebrow font-medium uppercase text-fg-3">Show EPG by default</span>
             <div
               id="settings-epg-default"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-2 gap-2"
               role="radiogroup"
               aria-label="Show EPG by default" data-i18n-attr="aria-label:aria.showEpgDefault">
               <button type="button" data-epg="on"  aria-pressed="false" data-i18n="settings.livetvLayout.epg.on" class="epg-default-btn btn">On</button>
@@ -233,7 +235,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.livetvLayout.columnWidth" class="text-eyebrow font-medium uppercase text-fg-3">Channel column width</span>
             <div
               id="settings-channel-width"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-2 sm:grid-cols-4 gap-2"
               role="radiogroup"
               aria-label="Channel column width" data-i18n-attr="aria-label:aria.channelColumnWidth">
               <button type="button" data-width="22" aria-pressed="false" data-i18n="settings.livetvLayout.width.compact" class="channel-width-btn btn">Compact</button>
@@ -312,6 +314,22 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             id="ua-msg"
             aria-live="polite"
             class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+        </article>
+
+        <!-- Playback: in-app player + external launcher (desktop only) -->
+        <article id="playback-section" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 hidden">
+          <div class="flex items-start gap-3">
+            <span class="icon-mark">
+              <IconPlayerPlay aria-hidden="true" stroke={2} />
+            </span>
+            <div class="flex flex-col gap-1 min-w-0">
+              <h3 data-i18n="settings.playback.title" class="text-base font-semibold">Playback</h3>
+              <p data-i18n="settings.playback.helper" class="text-xs text-fg-3">
+                Choose how streams open. External players play 4K and HDR more reliably.
+              </p>
+            </div>
+          </div>
+          <PlayerPicker client:load />
         </article>
 
         <!-- Discord Rich Presence -->
@@ -416,7 +434,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             </p>
             <div
               id="settings-download-concurrency"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-4 gap-2"
               role="radiogroup"
               aria-label="Concurrent downloads"
               data-i18n-attr="aria-label:settings.downloadsFolder.concurrency">
@@ -455,7 +473,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
               <span data-i18n="settings.backup.import">Import from file</span>
             </button>
           </div>
-          <input id="settings-import-input" type="file" accept="application/json,.json" hidden />
+          <input id="settings-import-input" type="file" accept="application/json,text/json,text/plain,.json" hidden />
           <span id="settings-backup-msg" aria-live="polite" class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
         </article>
 
@@ -500,7 +518,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             </p>
             <div
               id="settings-progress-retention"
-              class="flex flex-wrap gap-2"
+              class="grid grid-cols-2 sm:grid-cols-4 gap-2"
               role="radiogroup"
               aria-label="Continue Watching retention"
               data-i18n-attr="aria-label:settings.progressRetention.label">
@@ -600,32 +618,34 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
           <div id="update-progress-text" class="text-xs text-fg-3 tabular-nums">0%</div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2 pt-4 border-t border-line/60">
-          <button id="update-check" type="button" class="btn">
-            <IconRefresh aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.about.checkUpdate">Check for updates</span>
-          </button>
-          <button id="update-install" type="button" hidden class="btn">
-            <IconCloudDownload aria-hidden="true" class="btn-icon" />
-            <span id="update-install-label">Download &amp; install</span>
-          </button>
-          <button id="update-relaunch" type="button" hidden class="btn">
-            <span data-i18n="settings.about.restartNow">Restart now</span>
-          </button>
-          <a
-            id="update-github"
-            href="https://github.com/infinitel8p/Extreme-InfiniTV/releases/latest"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-external
-            class="btn ml-auto text-fg-2">
-            <IconBrandGithub aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.support.github">GitHub</span>
-          </a>
+        <div class="flex flex-col gap-2 pt-4 border-t border-line/60">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button id="update-check" type="button" class="btn justify-start sm:justify-center">
+              <IconRefresh aria-hidden="true" class="btn-icon" />
+              <span data-i18n="settings.about.checkUpdate">Check for updates</span>
+            </button>
+            <button id="update-install" type="button" hidden class="btn justify-start sm:justify-center">
+              <IconCloudDownload aria-hidden="true" class="btn-icon" />
+              <span id="update-install-label">Download &amp; install</span>
+            </button>
+            <button id="update-relaunch" type="button" hidden class="btn justify-start sm:justify-center">
+              <span data-i18n="settings.about.restartNow">Restart now</span>
+            </button>
+            <a
+              id="update-github"
+              href="https://github.com/infinitel8p/Extreme-InfiniTV/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-external
+              class="btn justify-start sm:justify-center text-fg-2">
+              <IconBrandGithub aria-hidden="true" class="btn-icon" />
+              <span data-i18n="settings.support.github">GitHub</span>
+            </a>
+          </div>
           <span
             id="update-msg"
             aria-live="polite"
-            class="text-xs text-fg-3 transition-opacity duration-300 basis-full"></span>
+            class="text-xs text-fg-3 transition-opacity duration-300"></span>
         </div>
 
         <p id="update-notes" class="hidden text-xs text-fg-3 whitespace-pre-line border-t border-line/60 pt-4"></p>
@@ -675,7 +695,7 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
           <div class="flex flex-col gap-1 min-w-0">
             <h3 data-i18n="settings.help.title" class="text-base font-semibold">Found a bug or have a suggestion?</h3>
             <p data-i18n="settings.help.intro" class="text-sm text-fg-2">
-              Bug reports and feature requests go to GitHub - search existing issues first, or open a new one. For general feedback, email works too.
+              Bug reports, feature requests, questions, and general feedback all go to GitHub - search existing issues first, or pick a template and open a new one.
             </p>
           </div>
         </div>
@@ -690,10 +710,13 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             <span data-i18n="settings.help.reportIssue">Report a bug</span>
           </a>
           <a
-            href="mailto:ludo@flexvelop.com?subject=Extreme%20InfiniTV%20feedback"
+            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-external
             class="btn justify-start sm:justify-center">
             <IconMail aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.help.emailFeedback">Email feedback</span>
+            <span data-i18n="settings.help.sendFeedback">Send feedback</span>
           </a>
         </div>
       </article>
@@ -802,19 +825,53 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
           </p>
         </div>
       </div>
-      <div class="flex flex-wrap justify-end gap-2 pt-1">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
         <button
           id="settings-reset-cancel"
           type="button"
-          class="btn">
+          class="btn justify-start sm:justify-center">
           <span data-i18n="common.cancel">Cancel</span>
         </button>
         <button
           id="settings-reset-confirm"
           type="button"
-          class="btn-danger">
+          class="btn-danger justify-start sm:justify-center">
           <IconTrash aria-hidden="true" class="btn-icon" />
           <span data-i18n="settings.danger.resetAll">Reset everything</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Import confirmation dialog -->
+  <dialog
+    id="settings-import-dialog"
+    aria-labelledby="settings-import-title"
+    aria-describedby="settings-import-desc"
+    class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
+           w-[min(28rem,calc(100vw-2rem))] backdrop:bg-black/60">
+    <div class="icon-mark-host flex flex-col p-5 gap-4">
+      <div class="flex items-start gap-3">
+        <span class="icon-mark icon-mark--bad icon-mark--lg">
+          <IconAlertTriangle aria-hidden="true" stroke={2} />
+        </span>
+        <div class="flex flex-col gap-1 min-w-0 pt-0.5">
+          <h2 id="settings-import-title" class="text-base font-semibold">
+            Replace everything with this backup?
+          </h2>
+          <p id="settings-import-desc" class="text-sm text-fg-2">
+            Import will replace all playlists, favorites, recents, watched
+            progress, hidden categories, and app settings on this device.
+          </p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+        <button id="settings-import-cancel" type="button" class="btn justify-start sm:justify-center">
+          <span data-i18n="common.cancel">Cancel</span>
+        </button>
+        <button id="settings-import-confirm" type="button" class="btn-danger justify-start sm:justify-center">
+          <IconUpload aria-hidden="true" class="btn-icon" />
+          <span>Continue</span>
         </button>
       </div>
     </div>
@@ -980,7 +1037,11 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
             const content = document.createElement("div")
             content.className =
               "changelog-md px-4 py-3 border-t border-line/60 text-sm text-fg-2"
-            content.innerHTML = renderMarkdown(release.body || "")
+            // marked + DOMPurify are dynamically imported the first time
+            // this runs; resolves to the sanitized HTML.
+            renderMarkdown(release.body || "").then((html) => {
+              content.innerHTML = html
+            })
             details.appendChild(content)
 
             body.appendChild(details)
@@ -1261,28 +1322,60 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
         const snapshot = await exportAll()
         const json = JSON.stringify(snapshot, null, 2)
         const filename = suggestedFilename()
-        if (isTauri) {
+        let savedTo = ""
+        if (isTauri && isAndroid) {
+          const androidFs = await import("@/scripts/lib/android-fs.js")
+          let pickerError = null
           try {
-            const { save } = await import("@tauri-apps/plugin-dialog")
-            const target = await save({
-              defaultPath: filename,
-              filters: [{ name: "JSON", extensions: ["json"] }],
-            })
-            if (!target) {
+            const written = await androidFs.saveJsonFile(filename, json)
+            if (!written) {
               setLoading(exportBtn, false)
               return
             }
-            const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-            await writeTextFile(target, json)
           } catch (e) {
-            log.error("[settings:export] tauri save failed:", e)
-            await downloadBlobWeb(filename, json)
+            pickerError = e
+            log.warn(
+              "[settings:export] SAF save picker failed, falling back to public Download/:",
+              e
+            )
           }
+          if (pickerError) {
+            try {
+              const publicPath = await androidFs.savePublicJsonFile(filename, json)
+              savedTo = publicPath || ""
+            } catch (publicErr) {
+              log.error("[settings:export] public Download/ save failed:", publicErr)
+              toastError(t("settings.toast.backupExportFail"), {
+                description:
+                  (publicErr && publicErr.message) ||
+                  (pickerError && pickerError.message) ||
+                  "Android FS is not available.",
+                duration: 7000,
+              })
+              return
+            }
+          }
+        } else if (isTauri) {
+          const { save } = await import("@tauri-apps/plugin-dialog")
+          const target = await save({
+            defaultPath: filename,
+            filters: [{ name: "JSON", extensions: ["json"] }],
+          })
+          if (!target) {
+            setLoading(exportBtn, false)
+            return
+          }
+          const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+          await writeTextFile(target, json)
+          savedTo = target
         } else {
           await downloadBlobWeb(filename, json)
         }
         toastSuccess(t("settings.toast.backupExported"), {
-          description: `${snapshot.creds.entries.length} playlist(s).`,
+          description: savedTo
+            ? `${snapshot.creds.entries.length} playlist(s) - ${savedTo}`
+            : `${snapshot.creds.entries.length} playlist(s).`,
+          duration: 6000,
         })
         flashMsg(backupMsgEl, "Saved.")
       } catch (e) {
@@ -1295,10 +1388,58 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
       }
     })
 
+    const importDialog = /** @type {HTMLDialogElement|null} */ (
+      document.getElementById("settings-import-dialog")
+    )
+    const importConfirmBtn = document.getElementById("settings-import-confirm")
+    const importCancelBtn = document.getElementById("settings-import-cancel")
+    if (importDialog)
+      attachDialogSpatialNav(importDialog, { defaultElement: "#settings-import-cancel" })
+
+    function askImportConfirm() {
+      return new Promise((resolve) => {
+        if (!importDialog) {
+          resolve(false)
+          return
+        }
+        const cleanup = () => {
+          importConfirmBtn?.removeEventListener("click", onYes)
+          importCancelBtn?.removeEventListener("click", onNo)
+          importDialog.removeEventListener("close", onClose)
+          importDialog.removeEventListener("click", onBackdrop)
+        }
+        const onYes = () => {
+          cleanup()
+          importDialog.close?.()
+          resolve(true)
+        }
+        const onNo = () => {
+          cleanup()
+          importDialog.close?.()
+          resolve(false)
+        }
+        const onClose = () => {
+          cleanup()
+          resolve(false)
+        }
+        const onBackdrop = (event) => {
+          if (event.target === importDialog) onNo()
+        }
+        importConfirmBtn?.addEventListener("click", onYes)
+        importCancelBtn?.addEventListener("click", onNo)
+        importDialog.addEventListener("close", onClose)
+        importDialog.addEventListener("click", onBackdrop)
+        if (typeof importDialog.showModal === "function") importDialog.showModal()
+        else importDialog.setAttribute("open", "")
+        requestAnimationFrame(() => {
+          window.SpatialNavigation?.makeFocusable?.()
+          importCancelBtn?.focus?.()
+        })
+      })
+    }
+
     async function applyImport(text) {
-      const ok = window.confirm(
-        "Import will replace all playlists, favorites, recents, watched progress, hidden categories, and app settings on this device. Continue?"
-      )
+      const ok = await askImportConfirm()
       if (!ok) return
       let parsed
       try {
@@ -1328,7 +1469,17 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
     }
 
     importBtn?.addEventListener("click", async () => {
-      if (isTauri) {
+      if (isTauri && isAndroid) {
+        try {
+          const { pickJsonFile } = await import("@/scripts/lib/android-fs.js")
+          const picked = await pickJsonFile()
+          if (!picked) return
+          await applyImport(picked.text)
+          return
+        } catch (e) {
+          log.warn("[settings:import] android-fs picker failed, falling back:", e)
+        }
+      } else if (isTauri) {
         try {
           const { open } = await import("@tauri-apps/plugin-dialog")
           const picked = await open({
@@ -1877,6 +2028,10 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
         }
       } catch (e) {
         log.error("Pick folder failed:", e)
+        toastError(t("settings.toast.pickFolderFail"), {
+          description: (e && e.message) || String(e) || "See console.",
+          duration: 7000,
+        })
       } finally {
         setLoading(dirPickBtn, false)
       }
@@ -2242,6 +2397,21 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
     if (discordSection && discordRpcSupported) {
       discordSection.classList.remove("hidden")
     }
+
+    // -------------------------------------------------------------------
+    // Playback (desktop-only): reveal the section if external launches are
+    // possible. The PlayerPicker component renders nothing on web/Android,
+    // so we only show the article wrapper there to avoid an empty card.
+    // -------------------------------------------------------------------
+    {
+      const playbackSection = document.getElementById("playback-section")
+      const externalAvailable =
+        !!(window.__TAURI_INTERNALS__ || window.__TAURI__) &&
+        !/Android/i.test(navigator.userAgent || "")
+      if (playbackSection && externalAvailable) {
+        playbackSection.classList.remove("hidden")
+      }
+    }
     if (discordClientIdInput) {
       discordClientIdInput.value = getDiscordClientId()
       let saveTimer = null
@@ -2280,7 +2450,12 @@ import FavoritesReorder from "@/components/FavoritesReorder.svelte"
         title.textContent = entry.title || "(untitled)"
         const sub = document.createElement("span")
         sub.className = "truncate text-2xs text-fg-3"
-        sub.textContent = entry.type === "m3u" ? "M3U source" : "Xtream"
+        sub.textContent =
+          entry.type === "xtream"
+            ? "Xtream"
+            : entry.type === "local-m3u"
+            ? "Local file"
+            : "M3U source"
         labelWrap.append(title, sub)
         row.appendChild(labelWrap)
 

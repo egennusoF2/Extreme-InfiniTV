@@ -1,4 +1,4 @@
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import { getUserAgent } from "@/scripts/lib/app-settings.js"
 
 const isTauri =
@@ -19,13 +19,13 @@ async function getTauriFetch() {
   return tauriFetchPromise
 }
 
-async function nativeFetch(url, init, u) {
+async function nativeFetch(url, init, u, callerSignal) {
   try {
     const r = await fetch(url, init)
     log.log(`[xt:net] native ok ${r.status}`, u)
     return r
   } catch (e) {
-    if (!init?.signal?.aborted) {
+    if (!callerSignal?.aborted) {
       log.error("[xt:net] native fetch failed", { url: u, error: e })
     }
     throw e
@@ -76,34 +76,107 @@ export async function streamingText(response, onProgress) {
   return result
 }
 
+const DEFAULT_TIMEOUT_MS = 20_000
+
+// Lightweight provider-fetch statistics
+const _stats = {
+  lastSuccessAt: 0,
+  lastFailureAt: 0,
+  lastError: "",
+  successes: 0,
+  failures: 0,
+  lastStatus: 0,
+}
+
+function noteSuccess(status) {
+  _stats.lastSuccessAt = Date.now()
+  _stats.lastStatus = status || 0
+  _stats.successes++
+}
+
+function noteFailure(error) {
+  _stats.lastFailureAt = Date.now()
+  _stats.lastError = String(error?.message || error || "").slice(0, 200)
+  _stats.failures++
+}
+
+export function getProviderStats() {
+  return { ..._stats }
+}
+
 export async function providerFetch(url, init = {}) {
   const ua = getUserAgent()
-  const u = String(url).slice(0, 200)
+  const u = redactUrl(String(url)).slice(0, 200)
+  const forceTauri = !!init.forceTauri
 
-  if (!ua || !isTauri) {
+  const callerSignal = init.signal
+  const callInit = { ...init }
+  delete callInit.forceTauri
+  if (!callerSignal) {
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      callInit.signal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS)
+    } else if (typeof AbortController !== "undefined") {
+      const controller = new AbortController()
+      setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+      callInit.signal = controller.signal
+    }
+  }
+
+  const useTauri = isTauri && (ua || forceTauri)
+
+  if (!useTauri) {
     log.log(`[xt:net] native start`, u)
-    return await nativeFetch(url, init, u)
+    try {
+      const r = await nativeFetch(url, callInit, u, callerSignal)
+      noteSuccess(r.status)
+      return r
+    } catch (e) {
+      if (!callerSignal?.aborted) noteFailure(e)
+      throw e
+    }
   }
 
   const tauriFetch = await getTauriFetch()
   if (!tauriFetch) {
     log.log(`[xt:net] native start (no plugin-http)`, u)
-    return await nativeFetch(url, init, u)
+    try {
+      const r = await nativeFetch(url, callInit, u, callerSignal)
+      noteSuccess(r.status)
+      return r
+    } catch (e) {
+      if (!callerSignal?.aborted) noteFailure(e)
+      throw e
+    }
   }
 
-  log.log(`[xt:net] tauri start ua=${ua}`, u)
-  const headers = new Headers(init.headers || {})
-  headers.set("User-Agent", ua)
+  log.log(`[xt:net] tauri start ua=${ua || "(default)"}`, u)
+  const headers = new Headers(callInit.headers || {})
+  if (ua) {
+    headers.set("User-Agent", ua)
+  } else if (forceTauri) {
+    headers.set(
+      "User-Agent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    )
+  }
   try {
-    const r = await tauriFetch(url, { ...init, headers })
+    const r = await tauriFetch(url, { ...callInit, headers })
     log.log(`[xt:net] tauri ok ${r.status}`, u)
+    noteSuccess(r.status)
     return r
   } catch (e) {
-    if (init?.signal?.aborted) throw e
+    if (callerSignal?.aborted) throw e
     log.warn(
       "[xt:net] tauri fetch failed, falling back to native:",
       String(e?.message || e)
     )
-    return await nativeFetch(url, init, u)
+    try {
+      const r = await nativeFetch(url, callInit, u, callerSignal)
+      noteSuccess(r.status)
+      return r
+    } catch (e2) {
+      if (!callerSignal?.aborted) noteFailure(e2)
+      throw e2
+    }
   }
 }

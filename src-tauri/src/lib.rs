@@ -1,6 +1,41 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod discord;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod external_player;
+
+#[cfg(target_os = "android")]
+mod android_diagnostics {
+    use std::sync::Once;
+
+    static LOGGER_INIT: Once = Once::new();
+
+    pub fn install() {
+        LOGGER_INIT.call_once(|| {
+            android_logger::init_once(
+                android_logger::Config::default()
+                    .with_max_level(log::LevelFilter::Warn)
+                    .with_tag("xtream-rs"),
+            );
+        });
+
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let location = info
+                .location()
+                .map(|loc| format!(" at {}:{}:{}", loc.file(), loc.line(), loc.column()))
+                .unwrap_or_default();
+            log::error!("rust panic{}: {}", location, info);
+            prev(info);
+        }));
+    }
+
+    #[ctor::ctor]
+    fn install_at_library_load() {
+        install();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -14,10 +49,12 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(discord::RpcState::default())
+        .manage(external_player::ExternalPlayerState::default())
         .invoke_handler(tauri::generate_handler![
             discord::discord_set_activity,
             discord::discord_clear,
             discord::discord_disconnect,
+            external_player::launch_external_player,
         ]);
 
     #[cfg(target_os = "android")]
@@ -32,6 +69,8 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            external_player::sweep_orphan_mpv_sockets();
             Ok(())
         })
         .run(tauri::generate_context!())
