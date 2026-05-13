@@ -39,6 +39,10 @@ const documentTitle = pageTitle
           if (uaPlatform.indexOf("android") !== -1) {
             document.documentElement.setAttribute("data-platform", "android");
           }
+          var hasTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
+          if (hasTauri && uaPlatform.indexOf("android") === -1) {
+            document.documentElement.setAttribute("data-tauri-desktop", "1");
+          }
         } catch (e) {}
         var cw = parseFloat(localStorage.getItem("xt_channels_w") || "");
         if (isFinite(cw) && cw >= 18 && cw <= 60) {
@@ -229,6 +233,13 @@ const documentTitle = pageTitle
 </html>
 
 <style is:global>
+  html[data-tauri-desktop] {
+    --xt-titlebar-h: 2.25rem;
+  }
+  html[data-tauri-desktop] body {
+    padding-top: var(--xt-titlebar-h);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

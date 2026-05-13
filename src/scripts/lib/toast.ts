@@ -47,7 +47,7 @@ function injectStyles() {
   style.textContent = `
     #${CONTAINER_ID} {
       position: fixed;
-      top: max(1rem, env(safe-area-inset-top));
+      top: calc(max(1rem, env(safe-area-inset-top, 0px)) + var(--xt-titlebar-h, 0px));
       left: 50%;
       transform: translateX(-50%);
       z-index: 10001;

@@ -10,7 +10,7 @@
 
 <div
 	id="xt-titlebar"
-	class="group hidden [html[data-tauri-desktop]_&]:flex items-center h-9 shrink-0 bg-bg border-b border-line select-none z-50"
+	class="group hidden [html[data-tauri-desktop]_&]:flex fixed top-0 inset-x-0 items-center h-9 bg-bg border-b border-line select-none z-[10002]"
 	data-tauri-drag-region
 	aria-label="Title bar">
 	<div
@@ -38,7 +38,7 @@
 	<div class="flex items-stretch h-full">
 		<button
 			type="button"
-			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-fg focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px] [-webkit-app-region:no-drag]"
+			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-fg focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px]"
 			data-action="minimize"
 			aria-label="Minimize">
 			<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -48,7 +48,7 @@
 		</button>
 		<button
 			type="button"
-			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-fg focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px] [-webkit-app-region:no-drag]"
+			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-surface-2 hover:text-fg focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px]"
 			data-action="maximize"
 			aria-label="Maximize">
 			<svg
@@ -89,7 +89,7 @@
 		</button>
 		<button
 			type="button"
-			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-[#e23030] hover:text-white focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px] [-webkit-app-region:no-drag]"
+			class="inline-flex items-center justify-center w-11.5 h-full bg-transparent border-0 text-fg-2 cursor-pointer transition-colors duration-100 hover:bg-[#e23030] hover:text-white focus-visible:outline focus-visible:outline-accent focus-visible:outline-offset-[-3px]"
 			data-action="close"
 			aria-label="Close">
 			<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -182,3 +182,14 @@
 		}
 	}
 </script>
+
+<style is:global>
+	[data-tauri-drag-region] {
+		-webkit-app-region: drag;
+		app-region: drag;
+	}
+	#xt-titlebar button {
+		-webkit-app-region: no-drag;
+		app-region: no-drag;
+	}
+</style>
