@@ -4,6 +4,9 @@ mod discord;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod external_player;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod tray;
+
 #[cfg(target_os = "android")]
 mod android_diagnostics {
     use std::sync::Once;
@@ -72,6 +75,8 @@ pub fn run() {
             }
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             external_player::sweep_orphan_mpv_sockets();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            tray::install(app)?;
             Ok(())
         })
         .run(tauri::generate_context!())

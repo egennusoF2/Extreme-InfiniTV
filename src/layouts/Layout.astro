@@ -383,6 +383,7 @@ const documentTitle = pageTitle
   import { initKeyboardHelp } from "@/scripts/lib/keyboard-help.js"
   import { initI18n } from "@/scripts/lib/i18n.js"
   import { initConnectivity } from "@/scripts/lib/connectivity.js"
+  import { initTrayHandler } from "@/scripts/lib/tray-handler"
   import { setupSplashBackdrop } from "@/scripts/lib/splash-backdrop"
   import { setupSplashComet } from "@/scripts/lib/splash-comet"
   initI18n()
@@ -494,6 +495,7 @@ const documentTitle = pageTitle
 
   initFocusGlide()
   initKeyboardHelp()
+  initTrayHandler()
 
   // -----------------------------------------------------------------------
   // Discord idle presence: push "Browsing the catalog" on every page load
