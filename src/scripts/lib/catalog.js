@@ -110,6 +110,12 @@ export async function ensureLive(creds, playlistId, opts = {}) {
         if (!r.ok) throw new HttpRetryError(r.status, `M3U ${r.status}`)
         text = await streamingText(r, onBytes)
       }
+      try {
+        const { epgUrl } = parseM3U(text)
+        if (epgUrl && typeof localStorage !== "undefined") {
+          localStorage.setItem(`xt_m3u_epg:${playlistId}`, epgUrl)
+        }
+      } catch {}
       return m3uToChannelList(text).sort((a, b) =>
         a.name.localeCompare(b.name, "en", { sensitivity: "base" })
       )

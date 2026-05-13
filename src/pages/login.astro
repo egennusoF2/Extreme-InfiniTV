@@ -205,7 +205,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 						class="field-input"
 					/>
 					<span data-i18n="login.field.playlistUrl.helper" class="text-xs text-fg-3 leading-relaxed">
-						Must end with .m3u or .m3u8.
+						Any http(s) URL that serves an M3U playlist. Extensions optional.
 					</span>
 				</label>
 			</div>
@@ -1303,7 +1303,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 				}
 			} else if (mode === "m3u") {
 				const url = m3uEl.value.trim();
-				if (!/^https?:\/\/[^\s]+\.m3u8?(\?.*)?$/i.test(url)) {
+				if (!/^https?:\/\//i.test(url)) {
 					showStatus(
 						"unavailable",
 						t("login.status.m3uScheme")

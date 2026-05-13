@@ -271,6 +271,107 @@ export async function detectPlayer(
 }
 
 // ---------------------------------------------------------------------------
+// Container detection
+// ---------------------------------------------------------------------------
+// Two paths: a synchronous hint from URL extension or supplied MIME, and an
+// async Content-Type probe used when the URL has no useful extension (e.g.
+// Dispatcharr's `/proxy/ts/stream/<uuid>` or Xtream's bare `/live/<u>/<p>/<id>`
+// which the server can serve as either HLS or raw TS).
+
+type StreamKind = "hls" | "ts"
+
+function streamKindHint(src: string, type?: string): StreamKind | "unknown" {
+  // URL extension wins: callers (notably Live TV) often pass a stock
+  // "application/x-mpegURL" MIME regardless of the real container. Trust the
+  // URL when it carries a signal, and fall through to the probe otherwise.
+  if (/\.m3u8(\?|$)/i.test(src)) return "hls"
+  if (/\.ts(\?|$)/i.test(src)) return "ts"
+  const mime = (type || "").toLowerCase()
+  if (mime === "video/mp2t" || mime === "video/mpeg") return "ts"
+  return "unknown"
+}
+
+const containerProbeCache = new Map<string, StreamKind>()
+
+async function probeContainer(src: string): Promise<StreamKind> {
+  let origin: string
+  try {
+    origin = new URL(src).origin
+  } catch {
+    return "hls"
+  }
+  const cached = containerProbeCache.get(origin)
+  if (cached) return cached
+  try {
+    const { providerFetch } = await import("@/scripts/lib/provider-fetch.js")
+    const controller =
+      typeof AbortController !== "undefined" ? new AbortController() : null
+    const timer = controller ? setTimeout(() => controller.abort(), 4000) : null
+    let kind: StreamKind = "hls"
+    try {
+      const response = await providerFetch(src, {
+        method: "GET",
+        headers: { Range: "bytes=0-0" },
+        signal: controller?.signal,
+      })
+      const contentType = (response.headers.get("content-type") || "").toLowerCase()
+      if (
+        contentType.includes("mp2t") ||
+        contentType.includes("mpeg-ts") ||
+        contentType.includes("mpegts")
+      ) {
+        kind = "ts"
+      }
+      try {
+        response.body?.cancel?.()
+      } catch {}
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+    containerProbeCache.set(origin, kind)
+    return kind
+  } catch {
+    return "hls"
+  }
+}
+
+interface MpegtsHandle {
+  destroy: () => void
+}
+
+async function attachMpegts(
+  videoEl: HTMLVideoElement,
+  url: string,
+): Promise<MpegtsHandle | null> {
+  const mpegtsMod = await import("mpegts.js")
+  const mpegts = (mpegtsMod as any).default || mpegtsMod
+  if (!mpegts?.isSupported?.()) {
+    log.warn("[xt:player] mpegts.js unsupported in this WebView")
+    return null
+  }
+  const player = mpegts.createPlayer({
+    type: "mpegts",
+    isLive: true,
+    url,
+  })
+  player.attachMediaElement(videoEl)
+  player.load()
+  try {
+    const playPromise = player.play?.()
+    if (playPromise && typeof (playPromise as Promise<void>).catch === "function") {
+      (playPromise as Promise<void>).catch(() => {})
+    }
+  } catch {}
+  return {
+    destroy() {
+      try { player.unload() } catch {}
+      try { player.detachMediaElement() } catch {}
+      try { player.destroy() } catch {}
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Embedded mounts
 // ---------------------------------------------------------------------------
 async function mountVideoJs(
@@ -302,8 +403,133 @@ async function mountVideoJs(
         smoothQualityChange: true,
       },
     },
-  })
-  return player as unknown as VjsLikeHandle
+  }) as any
+
+  let activeMpegts: MpegtsHandle | null = null
+  let pendingSrc: string | null = null
+
+  function getUnderlyingVideo(): HTMLVideoElement | null {
+    try {
+      const tech = player.tech?.({ IWillNotUseThisInPlugins: true })
+      const fromCall = tech?.el?.()
+      if (fromCall instanceof HTMLVideoElement) return fromCall
+      const fromField = tech?.el_
+      if (fromField instanceof HTMLVideoElement) return fromField
+    } catch {}
+    return null
+  }
+
+  function destroyMpegts() {
+    if (activeMpegts) {
+      try { activeMpegts.destroy() } catch {}
+      activeMpegts = null
+    }
+  }
+
+  function loadHls(src: string, type?: string) {
+    destroyMpegts()
+    player.src({ src, type: type || "application/x-mpegURL" })
+  }
+
+  async function loadTs(src: string) {
+    destroyMpegts()
+    const videoElement = getUnderlyingVideo()
+    if (!videoElement) {
+      loadHls(src)
+      return
+    }
+    try { player.reset() } catch {}
+    const handle = await attachMpegts(videoElement, src)
+    if (!handle) {
+      loadHls(src)
+      return
+    }
+    if (pendingSrc !== src) {
+      try { handle.destroy() } catch {}
+      return
+    }
+    activeMpegts = handle
+  }
+
+  const wrapped: VjsLikeHandle = {
+    src({ src, type }) {
+      pendingSrc = src
+      const hint = streamKindHint(src, type)
+      if (hint === "ts") {
+        loadTs(src)
+        return
+      }
+      if (hint === "hls") {
+        loadHls(src, type)
+        return
+      }
+      // Unknown extension - probe and only load once we know the container
+      destroyMpegts()
+      try { player.reset() } catch {}
+      probeContainer(src)
+        .then((kind) => {
+          if (pendingSrc !== src) return
+          if (kind === "ts") loadTs(src)
+          else loadHls(src, type)
+        })
+        .catch(() => {
+          if (pendingSrc !== src) return
+          loadHls(src, type)
+        })
+    },
+    play() {
+      return player.play()
+    },
+    pause() {
+      player.pause()
+    },
+    paused() {
+      return player.paused?.() ?? true
+    },
+    muted(value) {
+      if (value === undefined) return player.muted?.() ?? false
+      player.muted(!!value)
+      return undefined
+    },
+    reset() {
+      pendingSrc = null
+      destroyMpegts()
+      try { player.reset() } catch {}
+    },
+    dispose() {
+      pendingSrc = null
+      destroyMpegts()
+      try { player.dispose() } catch {}
+    },
+    duration() {
+      const dur = player.duration?.()
+      return Number.isFinite(dur) ? dur : 0
+    },
+    currentTime(value) {
+      if (value === undefined) return player.currentTime?.() || 0
+      player.currentTime(value)
+      return value
+    },
+    on(event, fn) {
+      player.on(event, fn)
+    },
+    off(event, fn) {
+      player.off?.(event, fn)
+    },
+    one(event, fn) {
+      player.one?.(event, fn)
+    },
+    el() {
+      return player.el?.()
+    },
+    error() {
+      return player.error?.() ?? null
+    },
+    requestFullscreen() {
+      return player.requestFullscreen?.()
+    },
+  }
+  return wrapped
 }
 
 async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle> {
@@ -328,6 +554,8 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
   parent.replaceChild(container, videoEl)
 
   let activeHls: { destroy: () => void } | null = null
+  let activeMpegts: MpegtsHandle | null = null
+  let pendingSrc: string | null = null
   const art = new Artplayer({
     container,
     url: "",
@@ -352,6 +580,10 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
           try { activeHls.destroy() } catch {}
           activeHls = null
         }
+        if (activeMpegts) {
+          try { activeMpegts.destroy() } catch {}
+          activeMpegts = null
+        }
         if ((Hls as any).isSupported()) {
           const hls = new (Hls as any)({ enableWorker: true })
           hls.loadSource(url)
@@ -364,6 +596,26 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
           video.src = url
         }
       },
+      async ts(video, url) {
+        if (activeHls) {
+          try { activeHls.destroy() } catch {}
+          activeHls = null
+        }
+        if (activeMpegts) {
+          try { activeMpegts.destroy() } catch {}
+          activeMpegts = null
+        }
+        const handle = await attachMpegts(video, url)
+        if (!handle) {
+          video.src = url
+          return
+        }
+        if (pendingSrc !== url) {
+          try { handle.destroy() } catch {}
+          return
+        }
+        activeMpegts = handle
+      },
     },
   })
 
@@ -372,17 +624,48 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
       try { activeHls.destroy() } catch {}
       activeHls = null
     }
+    if (activeMpegts) {
+      try { activeMpegts.destroy() } catch {}
+      activeMpegts = null
+    }
   })
 
   const handle: VjsLikeHandle = {
     src({ src, type }) {
+      pendingSrc = src
       if (activeHls) {
         try { activeHls.destroy() } catch {}
         activeHls = null
       }
-      const isM3u8 = type === "application/x-mpegURL" || /\.m3u8(\?|$)/i.test(src)
-      art.type = isM3u8 ? "m3u8" : ""
-      art.url = src
+      if (activeMpegts) {
+        try { activeMpegts.destroy() } catch {}
+        activeMpegts = null
+      }
+      const hint = streamKindHint(src, type)
+      if (hint === "hls") {
+        art.type = "m3u8"
+        art.url = src
+        return
+      }
+      if (hint === "ts") {
+        art.type = "ts"
+        art.url = src
+        return
+      }
+      // Unknown - wait for the probe before loading anything so we don't
+      // briefly hand a TS body to hls.js and trip MediaSource errors.
+      art.url = ""
+      probeContainer(src)
+        .then((kind) => {
+          if (pendingSrc !== src) return
+          art.type = kind === "ts" ? "ts" : "m3u8"
+          art.url = src
+        })
+        .catch(() => {
+          if (pendingSrc !== src) return
+          art.type = "m3u8"
+          art.url = src
+        })
     },
     play() {
       return art.play()
@@ -399,13 +682,23 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
       return undefined
     },
     reset() {
+      pendingSrc = null
       if (activeHls) {
         try { activeHls.destroy() } catch {}
         activeHls = null
       }
+      if (activeMpegts) {
+        try { activeMpegts.destroy() } catch {}
+        activeMpegts = null
+      }
       art.url = ""
     },
     dispose() {
+      pendingSrc = null
+      if (activeMpegts) {
+        try { activeMpegts.destroy() } catch {}
+        activeMpegts = null
+      }
       try { art.destroy(false) } catch {}
     },
     duration() {

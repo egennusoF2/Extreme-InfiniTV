@@ -11,8 +11,8 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "http://**" },
-        { "url": "https://**" }
+        { "url": "http://**/*" },
+        { "url": "https://**/*" }
       ]
     },
     "fs:default",
@@ -43,8 +43,8 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://**" },
-        { "url": "http://**" }
+        { "url": "https://**/*" },
+        { "url": "http://**/*" }
       ]
     }
   ]
