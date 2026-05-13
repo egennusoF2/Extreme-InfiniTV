@@ -124,6 +124,9 @@ export function buildMpvArgs(input: ArgvInput): string[] {
   const out: string[] = ["--force-window=immediate", "--no-terminal"]
   if (input.userAgent) out.push(`--user-agent=${input.userAgent}`)
   if (input.referer) out.push(`--referrer=${input.referer}`)
+  if (/^rtsp:\/\//i.test(input.src)) {
+    out.push("--demuxer-lavf-o=rtsp_transport=udp+tcp")
+  }
   const resume = Number(input.resumeSeconds || 0)
   if (Number.isFinite(resume) && resume > minResume) {
     out.push(`--start=${Math.floor(resume)}`)
