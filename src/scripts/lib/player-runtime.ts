@@ -281,16 +281,19 @@ export async function detectPlayer(
 // Dispatcharr's `/proxy/ts/stream/<uuid>` or Xtream's bare `/live/<u>/<p>/<id>`
 // which the server can serve as either HLS or raw TS).
 
-type StreamKind = "hls" | "ts"
+type StreamKind = "hls" | "ts" | "native"
 
 function streamKindHint(src: string, type?: string): StreamKind | "unknown" {
-  // URL extension wins: callers (notably Live TV) often pass a stock
-  // "application/x-mpegURL" MIME regardless of the real container. Trust the
-  // URL when it carries a signal, and fall through to the probe otherwise.
+  // URL extension wins: Live TV callers pass a stock
+  // "application/x-mpegURL" MIME regardless of the real container, so
+  // a contradicting extension overrides the MIME.
   if (/\.m3u8(\?|$)/i.test(src)) return "hls"
   if (/\.ts(\?|$)/i.test(src)) return "ts"
+  if (/\.(mp4|m4v|mkv|webm|mov|avi|m4a|mp3|aac|flac|ogg)(\?|$)/i.test(src)) return "native"
+
   const mime = (type || "").toLowerCase()
   if (mime === "video/mp2t" || mime === "video/mpeg") return "ts"
+  if (mime.startsWith("video/") || mime.startsWith("audio/")) return "native"
   return "unknown"
 }
 
@@ -324,6 +327,11 @@ async function probeContainer(src: string): Promise<StreamKind> {
         contentType.includes("mpegts")
       ) {
         kind = "ts"
+      } else if (
+        contentType.startsWith("video/") ||
+        contentType.startsWith("audio/")
+      ) {
+        kind = "native"
       }
       try {
         response.body?.cancel?.()
@@ -429,9 +437,14 @@ async function mountVideoJs(
     }
   }
 
-  function loadHls(src: string, type?: string) {
+  function loadHls(src: string) {
     destroyMpegts()
-    player.src({ src, type: type || "application/x-mpegURL" })
+    player.src({ src, type: "application/x-mpegURL" })
+  }
+
+  function loadNative(src: string, type?: string) {
+    destroyMpegts()
+    player.src({ src, type: type || "video/mp4" })
   }
 
   async function loadTs(src: string) {
@@ -463,7 +476,11 @@ async function mountVideoJs(
         return
       }
       if (hint === "hls") {
-        loadHls(src, type)
+        loadHls(src)
+        return
+      }
+      if (hint === "native") {
+        loadNative(src, type)
         return
       }
       // Unknown extension - probe and only load once we know the container
@@ -473,11 +490,12 @@ async function mountVideoJs(
         .then((kind) => {
           if (pendingSrc !== src) return
           if (kind === "ts") loadTs(src)
-          else loadHls(src, type)
+          else if (kind === "native") loadNative(src, type)
+          else loadHls(src)
         })
         .catch(() => {
           if (pendingSrc !== src) return
-          loadHls(src, type)
+          loadHls(src)
         })
     },
     play() {
@@ -655,13 +673,18 @@ async function mountArtPlayer(videoEl: HTMLVideoElement): Promise<VjsLikeHandle>
         art.url = src
         return
       }
+      if (hint === "native") {
+        art.type = ""
+        art.url = src
+        return
+      }
       // Unknown - wait for the probe before loading anything so we don't
       // briefly hand a TS body to hls.js and trip MediaSource errors.
       art.url = ""
       probeContainer(src)
         .then((kind) => {
           if (pendingSrc !== src) return
-          art.type = kind === "ts" ? "ts" : "m3u8"
+          art.type = kind === "ts" ? "ts" : kind === "native" ? "" : "m3u8"
           art.url = src
         })
         .catch(() => {
