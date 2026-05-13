@@ -41,7 +41,7 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
 <Layout pageTitle="Settings">
   <main class="flex-1 min-h-0 overflow-y-auto overflow-x-clip custom-scroll">
     <div
-      class="settings-stack w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12">
+      class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12 flex flex-col gap-6 lg:gap-8">
 
     <header class="route-hero shrink-0">
       <h1 data-i18n="settings.title" class="route-hero__title">Settings</h1>
@@ -50,12 +50,32 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       </p>
     </header>
 
+    <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
+
+    <nav
+      aria-label="Settings sections"
+      data-i18n-attr="aria-label:settings.nav.aria"
+      class="settings-nav
+        flex flex-row gap-1 -mx-4 sm:-mx-6 px-4 sm:px-6 shrink-0
+        lg:flex-col lg:gap-0.5 lg:m-0 lg:px-0 lg:py-1
+        lg:sticky lg:top-6 lg:self-start lg:w-52">
+      <a href="#settings-playlists"   data-i18n="settings.group.playlists"  class="settings-nav-link">Playlists</a>
+      <a href="#settings-preferences" data-i18n="settings.group.preferences" class="settings-nav-link">Preferences</a>
+      <a href="#settings-data"        data-i18n="settings.group.data"       class="settings-nav-link">Data</a>
+      <a href="#settings-help"        data-i18n="settings.group.help"       class="settings-nav-link">Help &amp; feedback</a>
+      <a href="#settings-about"       data-i18n="settings.group.about"      class="settings-nav-link">About</a>
+      <a href="#settings-support"     data-i18n="settings.group.support"    class="settings-nav-link">Support</a>
+      <a href="#settings-danger"      data-i18n="settings.group.dangerZone" data-danger="true" class="settings-nav-link">Danger zone</a>
+    </nav>
+
+    <div class="settings-stack flex-1 min-w-0">
+
     <!-- Group: Playlists -->
-    <section class="settings-group">
+    <section id="settings-playlists" class="settings-group scroll-mt-8">
       <h2 data-i18n="settings.group.playlists" class="settings-group__title">Playlists</h2>
       <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
         <div
-          id="settings-playlists"
+          id="settings-playlists-list"
           class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden">
           <div data-i18n="settings.playlists.empty" class="px-4 py-4 text-xs text-fg-3">No playlists yet.</div>
         </div>
@@ -76,7 +96,7 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
     </section>
 
     <!-- Group: Preferences -->
-    <section class="settings-group">
+    <section id="settings-preferences" class="settings-group scroll-mt-8">
       <h2 data-i18n="settings.group.preferences" class="settings-group__title">Preferences</h2>
       <div class="flex flex-col gap-4">
 
@@ -246,6 +266,35 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
           </div>
         </article>
 
+        <!-- Continue watching: how long paused movies / episodes linger -->
+        <article class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
+          <div class="flex items-start gap-3">
+            <span class="icon-mark">
+              <IconPlayerPlay aria-hidden="true" stroke={2} />
+            </span>
+            <div class="flex flex-col gap-1 min-w-0">
+              <h3 data-i18n="settings.progressRetention.title" class="text-base font-semibold">Continue watching</h3>
+              <p data-i18n="settings.progressRetention.helper" class="text-xs text-fg-3">
+                How long to keep paused movies and episodes in Continue Watching. Older entries are dropped on the next save. The 200-item cap still applies regardless.
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <span data-i18n="settings.progressRetention.label" class="text-eyebrow font-medium uppercase text-fg-3">Continue Watching retention</span>
+            <div
+              id="settings-progress-retention"
+              class="grid grid-cols-2 sm:grid-cols-4 gap-2"
+              role="radiogroup"
+              aria-label="Continue Watching retention"
+              data-i18n-attr="aria-label:settings.progressRetention.label">
+              <button type="button" data-retention="30"  aria-pressed="false" data-i18n="settings.progressRetention.30days"  class="retention-btn btn">30 days</button>
+              <button type="button" data-retention="90"  aria-pressed="false" data-i18n="settings.progressRetention.90days"  class="retention-btn btn">90 days</button>
+              <button type="button" data-retention="180" aria-pressed="false" data-i18n="settings.progressRetention.180days" class="retention-btn btn">180 days</button>
+              <button type="button" data-retention="0"   aria-pressed="false" data-i18n="settings.progressRetention.never"   class="retention-btn btn">Never</button>
+            </div>
+          </div>
+        </article>
+
         <!-- EPG: time zone offset (per active playlist) -->
         <article id="epg-tz-section" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
           <div class="flex items-start gap-3">
@@ -362,12 +411,12 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
     </section>
 
     <!-- Group: Data -->
-    <section class="settings-group">
+    <section id="settings-data" class="settings-group scroll-mt-8">
       <h2 data-i18n="settings.group.data" class="settings-group__title">Data</h2>
       <div class="flex flex-col gap-4">
 
         <!-- Downloads (folder only - queue lives on /downloads) -->
-        <article id="downloads-folder-section" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-3 scroll-mt-6">
+        <article id="downloads-folder-section" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 scroll-mt-6">
           <div class="flex items-start gap-3">
             <span class="icon-mark">
               <IconDownload aria-hidden="true" stroke={2} />
@@ -510,24 +559,6 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
             id="settings-cache-msg"
             aria-live="polite"
             class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
-
-          <div class="flex flex-col gap-2 pt-2 border-t border-line/60">
-            <span data-i18n="settings.progressRetention.label" class="text-eyebrow font-medium uppercase text-fg-3">Continue Watching retention</span>
-            <p data-i18n="settings.progressRetention.helper" class="text-xs text-fg-3">
-              How long to keep paused movies and episodes in Continue Watching. Older entries are dropped on the next save. The 200-item cap still applies regardless.
-            </p>
-            <div
-              id="settings-progress-retention"
-              class="grid grid-cols-2 sm:grid-cols-4 gap-2"
-              role="radiogroup"
-              aria-label="Continue Watching retention"
-              data-i18n-attr="aria-label:settings.progressRetention.label">
-              <button type="button" data-retention="30"  aria-pressed="false" data-i18n="settings.progressRetention.30days"  class="retention-btn btn">30 days</button>
-              <button type="button" data-retention="90"  aria-pressed="false" data-i18n="settings.progressRetention.90days"  class="retention-btn btn">90 days</button>
-              <button type="button" data-retention="180" aria-pressed="false" data-i18n="settings.progressRetention.180days" class="retention-btn btn">180 days</button>
-              <button type="button" data-retention="0"   aria-pressed="false" data-i18n="settings.progressRetention.never"   class="retention-btn btn">Never</button>
-            </div>
-          </div>
         </article>
 
         <!-- Hidden categories editor -->
@@ -567,8 +598,46 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       </div>
     </section>
 
+    <!-- Group: Help & feedback -->
+    <section id="settings-help" class="settings-group scroll-mt-8">
+      <h2 data-i18n="settings.group.help" class="settings-group__title">Help & feedback</h2>
+      <article class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
+        <div class="flex items-start gap-3">
+          <span class="icon-mark">
+            <IconMail aria-hidden="true" stroke={2} />
+          </span>
+          <div class="flex flex-col gap-1 min-w-0">
+            <h3 data-i18n="settings.help.title" class="text-base font-semibold">Found a bug or have a suggestion?</h3>
+            <p data-i18n="settings.help.intro" class="text-sm text-fg-2">
+              Bug reports, feature requests, questions, and general feedback all go to GitHub - search existing issues first, or pick a template and open a new one.
+            </p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <a
+            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-external
+            class="btn justify-start sm:justify-center">
+            <IconBug aria-hidden="true" class="btn-icon" />
+            <span data-i18n="settings.help.reportIssue">Report a bug</span>
+          </a>
+          <a
+            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-external
+            class="btn justify-start sm:justify-center">
+            <IconMail aria-hidden="true" class="btn-icon" />
+            <span data-i18n="settings.help.sendFeedback">Send feedback</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
     <!-- Group: About (App update + version + expiration) -->
-    <section class="settings-group">
+    <section id="settings-about" class="settings-group scroll-mt-8">
       <h2 data-i18n="settings.group.about" class="settings-group__title">About</h2>
       <article
         id="update-section"
@@ -684,46 +753,8 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       <span id="app-version" class="hidden"></span>
     </section>
 
-    <!-- Group: Help & feedback -->
-    <section class="settings-group">
-      <h2 data-i18n="settings.group.help" class="settings-group__title">Help & feedback</h2>
-      <article class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
-        <div class="flex items-start gap-3">
-          <span class="icon-mark">
-            <IconMail aria-hidden="true" stroke={2} />
-          </span>
-          <div class="flex flex-col gap-1 min-w-0">
-            <h3 data-i18n="settings.help.title" class="text-base font-semibold">Found a bug or have a suggestion?</h3>
-            <p data-i18n="settings.help.intro" class="text-sm text-fg-2">
-              Bug reports, feature requests, questions, and general feedback all go to GitHub - search existing issues first, or pick a template and open a new one.
-            </p>
-          </div>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <a
-            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-external
-            class="btn justify-start sm:justify-center">
-            <IconBug aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.help.reportIssue">Report a bug</span>
-          </a>
-          <a
-            href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-external
-            class="btn justify-start sm:justify-center">
-            <IconMail aria-hidden="true" class="btn-icon" />
-            <span data-i18n="settings.help.sendFeedback">Send feedback</span>
-          </a>
-        </div>
-      </article>
-    </section>
-
     <!-- Group: Support / donations -->
-    <section class="settings-group">
+    <section id="settings-support" class="settings-group scroll-mt-8">
       <h2 data-i18n="settings.group.support" class="settings-group__title">Support</h2>
       <article class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
         <div class="flex items-start gap-3">
@@ -773,7 +804,7 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
     </section>
 
     <!-- Group: Danger zone (always last) -->
-    <section class="settings-group settings-group--danger">
+    <section id="settings-danger" class="settings-group settings-group--danger scroll-mt-8">
       <h2 data-i18n="settings.group.dangerZone" class="settings-group__title">Danger zone</h2>
       <article class="icon-mark-host rounded-2xl border border-bad/30 bg-bad/[0.03] p-5 sm:p-6 flex flex-col gap-4">
         <div class="flex items-start gap-3">
@@ -800,7 +831,10 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       </article>
     </section>
 
-    </div>
+    </div><!-- /settings-stack -->
+    </div><!-- /lg:flex two-column wrapper -->
+
+    </div><!-- /page wrap -->
   </main>
 
   <!-- Reset confirmation dialog -->
@@ -1061,7 +1095,7 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       setTimeout(loadChangelog, 500)
     }
 
-    const playlistsEl = document.getElementById("settings-playlists")
+    const playlistsEl = document.getElementById("settings-playlists-list")
     const refreshBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("settings-refresh-active"))
     const cacheSizeEl = document.getElementById("settings-cache-size")
     const cacheNewestEl = document.getElementById("settings-cache-newest")
@@ -2486,5 +2520,156 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
         if (discordClientIdInput.value !== next) discordClientIdInput.value = next
       }
     })
+  </script>
+
+  <style>
+    /* One nav adapts across viewports: horizontal scroll on mobile,
+       sticky vertical rail on lg+. Same items, same visual language. */
+    .settings-nav {
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .settings-nav::-webkit-scrollbar { display: none; }
+    @media (min-width: 64em) {
+      .settings-nav { overflow-x: visible; }
+    }
+
+    /* Item styling: ghost text-only link with bg-tint hover/active. No
+       border outlines - both the chip pill border and the rail's left bar
+       are gone, since those were the visuals that read as "two navs".
+       No `outline: none` - the global `:focus-visible` rule in Layout
+       paints a 2px accent outline for keyboard focus. */
+    .settings-nav-link {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      flex-shrink: 0;
+      color: var(--color-fg-3);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      text-decoration: none;
+      padding: 0.5rem 0.875rem;
+      border-radius: 0.5rem;
+      min-height: 2.75rem;
+      transition:
+        color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+        background-color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (min-width: 64em) {
+      .settings-nav-link {
+        padding: 0.45rem 0.75rem;
+        min-height: 0;
+      }
+    }
+    .settings-nav-link:hover,
+    .settings-nav-link:focus-visible {
+      color: var(--color-fg);
+      background: var(--color-surface-2);
+    }
+    .settings-nav-link[aria-current="true"] {
+      color: var(--color-accent);
+      background: var(--color-accent-soft);
+    }
+
+    /* Danger-zone entry uses the bad token so it reads as destructive. */
+    .settings-nav-link[data-danger="true"] {
+      color: color-mix(in oklch, var(--color-bad) 65%, var(--color-fg-3));
+    }
+    .settings-nav-link[data-danger="true"]:hover,
+    .settings-nav-link[data-danger="true"]:focus-visible {
+      color: var(--color-bad);
+    }
+    .settings-nav-link[data-danger="true"][aria-current="true"] {
+      color: var(--color-bad);
+      background: color-mix(in oklch, var(--color-bad) 10%, transparent);
+    }
+  </style>
+
+  <script>
+    // Settings page scroll-spy: smooth-scroll on click, active-section
+    // highlighting via IntersectionObserver, URL hash deep-link.
+    {
+      const sections = Array.from(
+        document.querySelectorAll("section.settings-group[id]")
+      )
+      const links = Array.from(
+        document.querySelectorAll(".settings-nav-link")
+      )
+      const linksById = new Map<string, HTMLAnchorElement[]>()
+      for (const link of links) {
+        const targetId = link.getAttribute("href")?.replace("#", "")
+        if (!targetId) continue
+        const bucket = linksById.get(targetId)
+        if (bucket) bucket.push(link as HTMLAnchorElement)
+        else linksById.set(targetId, [link as HTMLAnchorElement])
+      }
+
+      let scrollLock = false
+
+      const setActive = (id: string) => {
+        for (const [otherId, bucket] of linksById) {
+          const isActive = otherId === id
+          for (const link of bucket) {
+            if (isActive) link.setAttribute("aria-current", "true")
+            else link.removeAttribute("aria-current")
+          }
+        }
+      }
+
+      for (const link of links) {
+        link.addEventListener("click", (event) => {
+          const targetId = link.getAttribute("href")?.replace("#", "")
+          if (!targetId) return
+          const target = document.getElementById(targetId)
+          if (!target) return
+          event.preventDefault()
+          scrollLock = true
+          setActive(targetId)
+          try {
+            history.replaceState(null, "", `#${targetId}`)
+          } catch {}
+          target.scrollIntoView({ behavior: "smooth", block: "start" })
+          // Release lock once smooth-scroll has settled so the observer can
+          // resume tracking. 800ms covers the longest typical animation.
+          window.setTimeout(() => {
+            scrollLock = false
+          }, 800)
+        })
+      }
+
+      // Active-state follows scroll. The rootMargin band marks the top 10%
+      // - 30% of the viewport as "current"; anything past that yields to
+      // the next section. Same shape macOS / Linear / Stripe use.
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (scrollLock) return
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              setActive(entry.target.id)
+              try {
+                history.replaceState(null, "", `#${entry.target.id}`)
+              } catch {}
+            }
+          }
+        },
+        { rootMargin: "-10% 0px -70% 0px" }
+      )
+      for (const section of sections) observer.observe(section)
+
+      // Deep-link from URL hash, else default to the first section.
+      const initialId =
+        location.hash?.slice(1) || sections[0]?.id || ""
+      if (initialId && linksById.has(initialId)) {
+        setActive(initialId)
+        if (location.hash) {
+          requestAnimationFrame(() => {
+            document
+              .getElementById(initialId)
+              ?.scrollIntoView({ block: "start" })
+          })
+        }
+      }
+    }
   </script>
 </Layout>

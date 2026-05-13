@@ -405,6 +405,24 @@ dialog[open]::backdrop {
     .field-input:disabled {
         @apply opacity-60 cursor-not-allowed;
     }
+    select.field-input {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23909090'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%20width='14'%20height='14'%3E%3Cpath%20d='M6%209l6%206l6%20-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.875rem center;
+        padding-right: 2.25rem;
+        padding-inline-end: 2.25rem;
+    }
+    [dir="rtl"] select.field-input {
+        background-position: left 0.875rem center;
+        padding-right: 0.75rem;
+        padding-left: 2.25rem;
+    }
+    select.field-input::-ms-expand {
+        display: none;
+    }
 
     .btn-icon {
         @apply size-4 shrink-0;
