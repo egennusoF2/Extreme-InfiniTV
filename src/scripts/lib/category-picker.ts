@@ -7,7 +7,7 @@
 // pre-extraction versions.
 import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
 import { debounce } from "@/scripts/lib/debounce.js"
-import { normalize } from "@/scripts/lib/text.js"
+import { normalize, scoreNormMatch } from "@/scripts/lib/text.js"
 import { toast } from "@/scripts/lib/toast.js"
 import { ICON_X } from "@/scripts/lib/icons.js"
 import {
@@ -231,6 +231,10 @@ export function mountCategoryPicker(
     btn.type = "button"
     btn.setAttribute("role", "option")
     btn.dataset.val = val
+    if (val.startsWith("__")) btn.dataset.rowKind = "pseudo"
+    else if (val === "") btn.dataset.rowKind = "all"
+    else if (rowOpts.hideAction === "unhide") btn.dataset.rowKind = "hidden"
+    else btn.dataset.rowKind = "regular"
     btn.className =
       "group/cat relative w-full py-2 px-2 text-sm flex items-center justify-between hover:bg-surface-2 focus:bg-surface-2 outline-none text-fg" +
       (extraClass ? " " + extraClass : "") +
@@ -361,26 +365,30 @@ export function mountCategoryPicker(
 
     frag.appendChild(addRow("", t("list.allCategories"), null, ""))
 
+    let origIndex = 0
     if (mode === "select") {
       for (const name of visibleNames) {
-        frag.appendChild(
-          addRow(name, name, counts.get(name) || 0, "", {
-            selectAction: true,
-            selectChecked: allowed.has(name),
-          })
-        )
+        const row = addRow(name, name, counts.get(name) || 0, "", {
+          selectAction: true,
+          selectChecked: allowed.has(name),
+        })
+        row.dataset.origIndex = String(origIndex++)
+        frag.appendChild(row)
       }
     } else {
       for (const name of visibleNames) {
-        frag.appendChild(
-          addRow(name, name, counts.get(name) || 0, "", { hideAction: "hide" })
-        )
+        const row = addRow(name, name, counts.get(name) || 0, "", {
+          hideAction: "hide",
+        })
+        row.dataset.origIndex = String(origIndex++)
+        frag.appendChild(row)
       }
     }
 
     if (hiddenNames.length) {
       const toggle = document.createElement("button")
       toggle.type = "button"
+      toggle.dataset.hiddenToggle = "1"
       toggle.className =
         "w-full px-2 py-2 text-xs text-fg-3 hover:text-fg hover:bg-surface-2 focus:bg-surface-2 outline-none flex items-center justify-between"
       toggle.innerHTML =
@@ -468,6 +476,48 @@ export function mountCategoryPicker(
           : `${pickedCount.toLocaleString()} of ${totalCount.toLocaleString()} selected`
     } else {
       statusEl.textContent = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} categories`
+    }
+
+    sortRegularRows(tokens)
+  }
+
+  // Reorder regular category rows by search relevance when a query is active
+  const sortRegularRows = (tokens: string[]): void => {
+    if (!listEl) return
+    const rows = Array.from(
+      listEl.querySelectorAll<HTMLElement>(
+        'button[role="option"][data-row-kind="regular"]'
+      )
+    )
+    if (!rows.length) return
+
+    const scoreOf = (row: HTMLElement): number => {
+      if (!tokens.length) return 0
+      if (row.style.display === "none") return 0
+      const label = normalize(row.dataset.val || row.textContent || "")
+      return scoreNormMatch(label, tokens)
+    }
+    const origOf = (row: HTMLElement): number =>
+      Number(row.dataset.origIndex) || 0
+
+    const sorted = rows.slice().sort((a, b) => {
+      if (tokens.length) {
+        const aShown = a.style.display !== "none"
+        const bShown = b.style.display !== "none"
+        if (aShown !== bShown) return aShown ? -1 : 1
+        if (aShown) {
+          const diff = scoreOf(b) - scoreOf(a)
+          if (diff !== 0) return diff
+        }
+      }
+      return origOf(a) - origOf(b)
+    })
+
+    const anchor = listEl.querySelector<HTMLElement>(
+      "[data-hidden-toggle]"
+    )
+    for (const row of sorted) {
+      listEl.insertBefore(row, anchor)
     }
   }
 
