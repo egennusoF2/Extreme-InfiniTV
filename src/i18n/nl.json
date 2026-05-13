@@ -838,5 +838,20 @@
   "settings.update.installed": "Geïnstalleerd.",
   "settings.update.installedRestart": "Update geïnstalleerd. Start opnieuw om toe te passen.",
   "settings.update.downloadFailed": "Download mislukt - {error}. Klik op Opnieuw downloaden om opnieuw te beginnen.",
-  "settings.update.reDownload": "Opnieuw downloaden"
+  "settings.update.reDownload": "Opnieuw downloaden",
+  "list.hideCategoryAria": "Hide category \"{label}\"",
+  "list.unhideCategoryAria": "Unhide category \"{label}\"",
+  "list.removeFromShownAria": "Remove \"{label}\" from shown categories",
+  "list.includeInShownAria": "Include \"{label}\" in shown categories",
+  "list.showingCategoryTitle": "Showing this category",
+  "list.showCategoryTitle": "Show this category",
+  "list.showHiddenCategories": "Show {count} hidden",
+  "list.hideHiddenCategories": "Hide {count} hidden",
+  "list.statusSelectPrompt": "Tick categories to include - {total} total",
+  "list.statusSelectActive": "Showing {picked} of {total} categories",
+  "list.statusSelectCount": "{picked} of {total} selected",
+  "list.statusSelectFiltered": "{visible} of {picked} selected (filtered)",
+  "list.statusHide": "{count} categories",
+  "list.statusHideWithHidden": "{count} categories · {hidden} hidden",
+  "list.statusHideFiltered": "{visible} of {total} categories"
 }

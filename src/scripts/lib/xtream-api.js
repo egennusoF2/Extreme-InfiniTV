@@ -21,6 +21,9 @@ import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { log } from "@/scripts/lib/log.js"
 
 const failoverNoticed = new Set()
+const CANDIDATE_TIMEOUT_MS = 8_000
+const allFailedAt = new Map()
+const ALL_FAILED_TTL_MS = 15_000
 
 async function noticeFailover() {
   try {
@@ -32,6 +35,24 @@ async function noticeFailover() {
       variant: "default",
     })
   } catch {}
+}
+
+async function fetchCandidate(url, opts) {
+  const userSignal = opts?.signal
+  if (typeof AbortController === "undefined") {
+    return providerFetch(url, opts)
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), CANDIDATE_TIMEOUT_MS)
+  if (userSignal) {
+    if (userSignal.aborted) controller.abort()
+    else userSignal.addEventListener("abort", () => controller.abort(), { once: true })
+  }
+  try {
+    return await providerFetch(url, { ...opts, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**
@@ -52,6 +73,16 @@ export async function xtreamApiFetch(action, params = {}, opts = {}) {
   }
 
   const startIndex = Math.min(getMirrorPin(entry._id), candidates.length - 1)
+
+  const lastAllFailed = allFailedAt.get(entry._id)
+  if (lastAllFailed && Date.now() - lastAllFailed < ALL_FAILED_TTL_MS) {
+    const creds = candidates[startIndex]
+    const url = buildApiUrl(creds, action, params)
+    const response = await fetchCandidate(url, opts)
+    if (response.ok) allFailedAt.delete(entry._id)
+    return response
+  }
+
   let lastResponse = null
   let lastError = null
 
@@ -60,7 +91,7 @@ export async function xtreamApiFetch(action, params = {}, opts = {}) {
     const creds = candidates[index]
     const url = buildApiUrl(creds, action, params)
     try {
-      const response = await providerFetch(url, opts)
+      const response = await fetchCandidate(url, opts)
       if (response.ok) {
         if (index !== startIndex) {
           log.warn(
@@ -72,6 +103,7 @@ export async function xtreamApiFetch(action, params = {}, opts = {}) {
           }
         }
         setMirrorPin(entry._id, index)
+        allFailedAt.delete(entry._id)
         return response
       }
       lastResponse = response
@@ -86,7 +118,10 @@ export async function xtreamApiFetch(action, params = {}, opts = {}) {
     }
   }
 
-  if (lastResponse) return lastResponse
+  if (lastResponse) {
+    allFailedAt.set(entry._id, Date.now())
+    return lastResponse
+  }
   throw lastError || new Error(`xtreamApiFetch: ${action} - all candidates failed`)
 }
 
@@ -102,6 +137,7 @@ if (typeof document !== "undefined") {
   document.addEventListener("xt:entries-updated", () => {
     verifiedAt.clear()
     failoverNoticed.clear()
+    allFailedAt.clear()
   })
 }
 

@@ -142,7 +142,6 @@ async function ensureVodCategoryMap() {
 // ----------------------------
 const PAGE_SIZE = 200
 const AUTO_LOAD_CAP = 1500
-let renderToken = 0
 /** @type {IntersectionObserver|null} */
 let infiniteObs = null
 let renderedCount = 0
@@ -294,7 +293,6 @@ function renderGrid() {
 
 function renderGridInner() {
   if (!gridEl) return
-  ++renderToken
   teardownInfiniteObs()
   gridEl.replaceChildren()
   renderedCount = 0

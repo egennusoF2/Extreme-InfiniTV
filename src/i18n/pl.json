@@ -838,5 +838,20 @@
   "settings.update.installed": "Zainstalowano.",
   "settings.update.installedRestart": "Aktualizacja zainstalowana. Uruchom ponownie, aby zastosować.",
   "settings.update.downloadFailed": "Pobieranie nie powiodło się - {error}. Kliknij Pobierz ponownie, aby zacząć od nowa.",
-  "settings.update.reDownload": "Pobierz ponownie"
+  "settings.update.reDownload": "Pobierz ponownie",
+  "list.hideCategoryAria": "Hide category \"{label}\"",
+  "list.unhideCategoryAria": "Unhide category \"{label}\"",
+  "list.removeFromShownAria": "Remove \"{label}\" from shown categories",
+  "list.includeInShownAria": "Include \"{label}\" in shown categories",
+  "list.showingCategoryTitle": "Showing this category",
+  "list.showCategoryTitle": "Show this category",
+  "list.showHiddenCategories": "Show {count} hidden",
+  "list.hideHiddenCategories": "Hide {count} hidden",
+  "list.statusSelectPrompt": "Tick categories to include - {total} total",
+  "list.statusSelectActive": "Showing {picked} of {total} categories",
+  "list.statusSelectCount": "{picked} of {total} selected",
+  "list.statusSelectFiltered": "{visible} of {picked} selected (filtered)",
+  "list.statusHide": "{count} categories",
+  "list.statusHideWithHidden": "{count} categories · {hidden} hidden",
+  "list.statusHideFiltered": "{visible} of {total} categories"
 }

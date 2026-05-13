@@ -838,5 +838,20 @@
   "settings.update.installed": "انسٹال ہو گیا۔",
   "settings.update.installedRestart": "اپ ڈیٹ انسٹال ہو گیا۔ لاگو کرنے کے لیے دوبارہ شروع کریں۔",
   "settings.update.downloadFailed": "ڈاؤن لوڈ ناکام - {error}۔ دوبارہ شروع کرنے کے لیے دوبارہ ڈاؤن لوڈ پر کلک کریں۔",
-  "settings.update.reDownload": "دوبارہ ڈاؤن لوڈ"
+  "settings.update.reDownload": "دوبارہ ڈاؤن لوڈ",
+  "list.hideCategoryAria": "Hide category \"{label}\"",
+  "list.unhideCategoryAria": "Unhide category \"{label}\"",
+  "list.removeFromShownAria": "Remove \"{label}\" from shown categories",
+  "list.includeInShownAria": "Include \"{label}\" in shown categories",
+  "list.showingCategoryTitle": "Showing this category",
+  "list.showCategoryTitle": "Show this category",
+  "list.showHiddenCategories": "Show {count} hidden",
+  "list.hideHiddenCategories": "Hide {count} hidden",
+  "list.statusSelectPrompt": "Tick categories to include - {total} total",
+  "list.statusSelectActive": "Showing {picked} of {total} categories",
+  "list.statusSelectCount": "{picked} of {total} selected",
+  "list.statusSelectFiltered": "{visible} of {picked} selected (filtered)",
+  "list.statusHide": "{count} categories",
+  "list.statusHideWithHidden": "{count} categories · {hidden} hidden",
+  "list.statusHideFiltered": "{visible} of {total} categories"
 }

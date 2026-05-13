@@ -838,5 +838,20 @@
   "settings.update.installed": "インストール済み。",
   "settings.update.installedRestart": "更新がインストールされました。再起動して適用してください。",
   "settings.update.downloadFailed": "ダウンロードに失敗 - {error}。「再ダウンロード」をクリックしてやり直してください。",
-  "settings.update.reDownload": "再ダウンロード"
+  "settings.update.reDownload": "再ダウンロード",
+  "list.hideCategoryAria": "Hide category \"{label}\"",
+  "list.unhideCategoryAria": "Unhide category \"{label}\"",
+  "list.removeFromShownAria": "Remove \"{label}\" from shown categories",
+  "list.includeInShownAria": "Include \"{label}\" in shown categories",
+  "list.showingCategoryTitle": "Showing this category",
+  "list.showCategoryTitle": "Show this category",
+  "list.showHiddenCategories": "Show {count} hidden",
+  "list.hideHiddenCategories": "Hide {count} hidden",
+  "list.statusSelectPrompt": "Tick categories to include - {total} total",
+  "list.statusSelectActive": "Showing {picked} of {total} categories",
+  "list.statusSelectCount": "{picked} of {total} selected",
+  "list.statusSelectFiltered": "{visible} of {picked} selected (filtered)",
+  "list.statusHide": "{count} categories",
+  "list.statusHideWithHidden": "{count} categories · {hidden} hidden",
+  "list.statusHideFiltered": "{visible} of {total} categories"
 }

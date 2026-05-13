@@ -83,8 +83,12 @@ pub fn run() {
             {
                 use tauri::Manager;
                 if let Some(main_window) = app.get_webview_window("main") {
-                    let _ = main_window.set_decorations(false);
-                    let _ = main_window.set_shadow(true);
+                    if let Err(error) = main_window.set_decorations(false) {
+                        log::warn!("[window] set_decorations(false) failed: {error}");
+                    }
+                    if let Err(error) = main_window.set_shadow(true) {
+                        log::warn!("[window] set_shadow(true) failed: {error}");
+                    }
                 }
             }
             Ok(())

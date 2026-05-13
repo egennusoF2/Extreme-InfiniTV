@@ -112,8 +112,6 @@
 		/Android/i.test(navigator.userAgent || "");
 
 	if (isTauri && !isAndroid) {
-		document.documentElement.setAttribute("data-tauri-desktop", "1");
-
 		const titlebar = document.getElementById("xt-titlebar");
 		if (titlebar) {
 			const maxBtn = titlebar.querySelector<HTMLButtonElement>(

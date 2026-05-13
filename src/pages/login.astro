@@ -631,6 +631,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 
 		row.append(inputRow, status);
 		epgListEl.appendChild(row);
+		window.SpatialNavigation?.makeFocusable?.();
 		return row;
 	}
 
@@ -771,6 +772,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 
 		row.append(header, serverInput, credRow);
 		mirrorsListEl.appendChild(row);
+		window.SpatialNavigation?.makeFocusable?.();
 		return row;
 	}
 

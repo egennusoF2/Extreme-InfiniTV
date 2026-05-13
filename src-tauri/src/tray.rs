@@ -60,7 +60,7 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .cloned()
         .ok_or("default window icon missing - check bundle.icon in tauri.conf.json")?;
 
-    TrayIconBuilder::with_id("main")
+    let tray_result = TrayIconBuilder::with_id("main")
         .icon(icon)
         .tooltip("Extreme InfiniTV")
         .menu(&menu)
@@ -87,16 +87,27 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 toggle_main_window(tray.app_handle());
             }
         })
-        .build(app)?;
+        .build(app);
 
-    if let Some(main_window) = app.get_webview_window("main") {
-        let window_for_hide = main_window.clone();
-        main_window.on_window_event(move |event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window_for_hide.hide();
-            }
-        });
+    // Only intercept close-to-tray when the tray icon actually installed
+    let tray_installed = match tray_result {
+        Ok(_) => true,
+        Err(error) => {
+            log::warn!("[tray] tray icon unavailable, close-to-tray disabled: {error}");
+            false
+        }
+    };
+
+    if tray_installed {
+        if let Some(main_window) = app.get_webview_window("main") {
+            let window_for_hide = main_window.clone();
+            main_window.on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window_for_hide.hide();
+                }
+            });
+        }
     }
 
     Ok(())

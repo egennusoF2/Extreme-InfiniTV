@@ -941,7 +941,7 @@ export function normaliseChannelName(name) {
   return String(name)
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(QUALITY_SUFFIX_RX, " ")
     .replace(/[^\p{L}\p{N}+]+/gu, "")
 }
@@ -1033,6 +1033,11 @@ if (typeof document !== "undefined") {
   document.addEventListener("xt:channel-epg-changed", (event) => {
     const detail = event.detail
     if (detail?.playlistId) invalidateTvgIdMemo(detail.playlistId)
+  })
+
+  document.addEventListener("xt:active-changed", () => {
+    tvgIdMemo.clear()
+    availableEpgCache.clear()
   })
 }
 

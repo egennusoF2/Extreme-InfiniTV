@@ -238,6 +238,7 @@ function renderMapWindow() {
   }
   if (token !== mapRenderToken) return
   mapSpacer.innerHTML = html.join("")
+  ;(window as any).SpatialNavigation?.makeFocusable?.()
 }
 
 function scheduleScrollRender() {
@@ -411,15 +412,18 @@ function renderPickList() {
   const cap = Math.min(scored.length, PICKER_RENDER_CAP)
   for (let i = 0; i < cap; i++) {
     const { entry } = scored[i]
-    const highlight = entry.tvgId === currentOverride ? " bg-accent-soft/40" : ""
+    const isCurrent = entry.tvgId === currentOverride
+    const highlight = isCurrent ? " bg-accent-soft/40" : ""
+    const ariaCurrent = isCurrent ? ` aria-current="true"` : ""
     const countLabel = t("epg.map.programmeCount", {
       count: entry.count.toLocaleString(),
     })
     html.push(
-      `<button type="button" data-tvg-id="${escapeHtml(entry.tvgId)}" class="${rowClass}${highlight}"><div class="flex-1 min-w-0"><div class="truncate text-sm font-medium text-fg">${escapeHtml(entry.name)}</div><div class="truncate text-2xs text-fg-3 tabular-nums">${escapeHtml(entry.tvgId)}</div></div><span class="shrink-0 text-2xs text-fg-3 tabular-nums">${escapeHtml(countLabel)}</span></button>`
+      `<button type="button" data-tvg-id="${escapeHtml(entry.tvgId)}"${ariaCurrent} class="${rowClass}${highlight}"><div class="flex-1 min-w-0"><div class="truncate text-sm font-medium text-fg">${escapeHtml(entry.name)}</div><div class="truncate text-2xs text-fg-3 tabular-nums">${escapeHtml(entry.tvgId)}</div></div><span class="shrink-0 text-2xs text-fg-3 tabular-nums">${escapeHtml(countLabel)}</span></button>`
     )
   }
   pickListEl.innerHTML = html.join("")
+  ;(window as any).SpatialNavigation?.makeFocusable?.()
   if (pickStatusEl) {
     pickStatusEl.textContent = t("epg.map.pickerStatus", {
       shown: cap.toLocaleString(),

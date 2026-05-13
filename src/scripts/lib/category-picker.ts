@@ -88,6 +88,7 @@ export interface CategoryPickerHandle {
   categoryMode(): "hide" | "select"
   /** True if a category passes the resolved hide / allow filter. */
   categoryPassesFilter(name: string): boolean
+  destroy(): void
 }
 
 export function mountCategoryPicker(
@@ -118,6 +119,15 @@ export function mountCategoryPicker(
 
   if (dialog) {
     attachDialogSpatialNav(dialog, { defaultElement: `#${opts.idPrefix}-search` })
+  }
+
+  // Track document-level listeners so destroy() can detach them. Per-element
+  // listeners on dialog / triggerEl / listEl etc. die with the page-bundle
+  // teardown, but document listeners outlive that and leak across remounts.
+  const docListeners: Array<{ event: string; fn: EventListener }> = []
+  const onDoc = (event: string, fn: EventListener): void => {
+    docListeners.push({ event, fn })
+    document.addEventListener(event, fn)
   }
 
   let activeCat = ""
@@ -187,9 +197,11 @@ export function mountCategoryPicker(
 
   const highlightActiveInList = (): void => {
     if (!listEl) return
-    for (const el of Array.from(listEl.querySelectorAll('button[role="option"]'))) {
-      const btn = el as HTMLElement
-      btn.classList.toggle("bg-surface-2", (btn.dataset.val || "") === activeCat)
+    for (const el of Array.from(listEl.querySelectorAll('[role="option"]'))) {
+      const row = el as HTMLElement
+      const isActive = (row.dataset.val || "") === activeCat
+      row.classList.toggle("bg-surface-2", isActive)
+      row.setAttribute("aria-selected", String(isActive))
     }
   }
 
@@ -226,24 +238,25 @@ export function mountCategoryPicker(
       selectChecked?: boolean
       dim?: boolean
     } = {}
-  ): HTMLButtonElement => {
-    const btn = document.createElement("button")
-    btn.type = "button"
-    btn.setAttribute("role", "option")
-    btn.dataset.val = val
-    if (val.startsWith("__")) btn.dataset.rowKind = "pseudo"
-    else if (val === "") btn.dataset.rowKind = "all"
-    else if (rowOpts.hideAction === "unhide") btn.dataset.rowKind = "hidden"
-    else btn.dataset.rowKind = "regular"
-    btn.className =
-      "group/cat relative w-full py-2 px-2 text-sm flex items-center justify-between hover:bg-surface-2 focus:bg-surface-2 outline-none text-fg" +
+  ): HTMLElement => {
+    const row = document.createElement("div")
+    row.setAttribute("role", "option")
+    row.setAttribute("tabindex", "0")
+    row.setAttribute("aria-selected", "false")
+    row.dataset.val = val
+    if (val.startsWith("__")) row.dataset.rowKind = "pseudo"
+    else if (val === "") row.dataset.rowKind = "all"
+    else if (rowOpts.hideAction === "unhide") row.dataset.rowKind = "hidden"
+    else row.dataset.rowKind = "regular"
+    row.className =
+      "group/cat relative w-full py-2 px-2 text-sm flex items-center justify-between hover:bg-surface-2 focus:bg-surface-2 outline-none text-fg cursor-pointer" +
       (extraClass ? " " + extraClass : "") +
       (rowOpts.dim ? " opacity-60" : "")
 
     const left = document.createElement("span")
     left.className = "truncate"
     left.textContent = label
-    btn.appendChild(left)
+    row.appendChild(left)
 
     const right = document.createElement("span")
     right.className = "ml-3 shrink-0 flex items-center gap-1.5"
@@ -258,8 +271,8 @@ export function mountCategoryPicker(
       rightAction.setAttribute(
         "aria-label",
         rowOpts.hideAction === "hide"
-          ? `Hide category "${label}"`
-          : `Unhide category "${label}"`
+          ? t("list.hideCategoryAria", { label })
+          : t("list.unhideCategoryAria", { label }),
       )
       rightAction.title =
         rowOpts.hideAction === "hide"
@@ -292,10 +305,12 @@ export function mountCategoryPicker(
       rightAction.setAttribute(
         "aria-label",
         checked
-          ? `Remove "${label}" from shown categories`
-          : `Show only checked categories - include "${label}"`
+          ? t("list.removeFromShownAria", { label })
+          : t("list.includeInShownAria", { label }),
       )
-      rightAction.title = checked ? "Showing this category" : "Show this category"
+      rightAction.title = checked
+        ? t("list.showingCategoryTitle")
+        : t("list.showCategoryTitle")
       rightAction.className =
         "category-select-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md " +
         "border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent " +
@@ -327,11 +342,17 @@ export function mountCategoryPicker(
       right.appendChild(spacer)
     }
 
-    btn.appendChild(right)
-    btn.addEventListener("click", () => {
-      setActiveCat(val)
+    row.appendChild(right)
+    const activateRow = (): void => setActiveCat(val)
+    row.addEventListener("click", activateRow)
+    row.addEventListener("keydown", (ev) => {
+      if (ev.target !== ev.currentTarget) return
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault()
+        activateRow()
+      }
     })
-    return btn
+    return row
   }
 
   const renderList = (): void => {
@@ -355,11 +376,11 @@ export function mountCategoryPicker(
     const favs = pid ? getFavorites(pid, pseudoKind) : new Set<number>()
     const recs = pid ? getRecents(pid, pseudoKind) : []
 
-    const favRow = addRow(CAT_FAVORITES, "★ Favorites", favs.size, "text-accent")
+    const favRow = addRow(CAT_FAVORITES, t("list.specialFavorites"), favs.size, "text-accent")
     if (favs.size === 0) favRow.style.display = "none"
     frag.appendChild(favRow)
 
-    const recRow = addRow(CAT_RECENTS, "🕒 Recently watched", recs.length, "")
+    const recRow = addRow(CAT_RECENTS, t("list.specialRecents"), recs.length, "")
     if (recs.length === 0) recRow.style.display = "none"
     frag.appendChild(recRow)
 
@@ -391,8 +412,11 @@ export function mountCategoryPicker(
       toggle.dataset.hiddenToggle = "1"
       toggle.className =
         "w-full px-2 py-2 text-xs text-fg-3 hover:text-fg hover:bg-surface-2 focus:bg-surface-2 outline-none flex items-center justify-between"
+      const toggleLabel = showHidden
+        ? t("list.hideHiddenCategories", { count: hiddenNames.length })
+        : t("list.showHiddenCategories", { count: hiddenNames.length })
       toggle.innerHTML =
-        `<span class="truncate">${showHidden ? "Hide" : "Show"} ${hiddenNames.length} hidden ${hiddenNames.length === 1 ? "category" : "categories"}</span>` +
+        `<span class="truncate">${toggleLabel}</span>` +
         `<span class="ml-3 shrink-0 tabular-nums">${showHidden ? "▴" : "▾"}</span>`
       toggle.addEventListener("click", () => {
         showHidden = !showHidden
@@ -422,18 +446,25 @@ export function mountCategoryPicker(
         )
         statusEl.textContent =
           pickedCount === 0
-            ? `Tick categories to include - ${totalCats.toLocaleString()} total`
-            : `Showing ${pickedCount.toLocaleString()} of ${totalCats.toLocaleString()} categories`
+            ? t("list.statusSelectPrompt", { total: totalCats.toLocaleString() })
+            : t("list.statusSelectActive", {
+                picked: pickedCount.toLocaleString(),
+                total: totalCats.toLocaleString(),
+              })
       } else {
         const total = visibleNames.length
-        statusEl.textContent =
-          `${total.toLocaleString()} ${total === 1 ? "category" : "categories"}` +
-          (hiddenNames.length ? ` · ${hiddenNames.length} hidden` : "")
+        statusEl.textContent = hiddenNames.length
+          ? t("list.statusHideWithHidden", {
+              count: total.toLocaleString(),
+              hidden: hiddenNames.length.toLocaleString(),
+            })
+          : t("list.statusHide", { count: total.toLocaleString() })
       }
     }
 
     highlightActiveInList()
     filterCategories()
+    ;(window as any).SpatialNavigation?.makeFocusable?.()
   }
 
   const filterCategories = (): void => {
@@ -448,34 +479,43 @@ export function mountCategoryPicker(
     let totalCount = 0
 
     for (const el of Array.from(
-      listEl.querySelectorAll('button[role="option"]')
+      listEl.querySelectorAll('[role="option"]')
     )) {
-      const btn = el as HTMLElement
-      const val = btn.dataset.val || ""
+      const row = el as HTMLElement
+      const val = row.dataset.val || ""
       const isPseudo = val.startsWith("__")
       const isAllButton = val === ""
       const isRegularRow = !isAllButton && !isPseudo
       if (isRegularRow) totalCount++
-      const label = normalize(val || btn.textContent || "")
+      const label = normalize(val || row.textContent || "")
       const searchMatches =
         !tokens.length || tokens.every((token) => label.includes(token))
       let show = searchMatches
       if (show && filterToSelected && isRegularRow) {
         show = !!allowed && allowed.has(val)
       }
-      btn.style.display = show ? "" : "none"
+      row.style.display = show ? "" : "none"
       if (show && isRegularRow) visibleCount++
     }
 
     if (mode === "select") {
       const pickedCount = allowed ? allowed.size : 0
       statusEl.textContent = filterToSelected
-        ? `${visibleCount.toLocaleString()} of ${pickedCount.toLocaleString()} selected (filtered)`
+        ? t("list.statusSelectFiltered", {
+            visible: visibleCount.toLocaleString(),
+            picked: pickedCount.toLocaleString(),
+          })
         : pickedCount === 0
-          ? `Tick categories to include - ${totalCount.toLocaleString()} total`
-          : `${pickedCount.toLocaleString()} of ${totalCount.toLocaleString()} selected`
+          ? t("list.statusSelectPrompt", { total: totalCount.toLocaleString() })
+          : t("list.statusSelectCount", {
+              picked: pickedCount.toLocaleString(),
+              total: totalCount.toLocaleString(),
+            })
     } else {
-      statusEl.textContent = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} categories`
+      statusEl.textContent = t("list.statusHideFiltered", {
+        visible: visibleCount.toLocaleString(),
+        total: totalCount.toLocaleString(),
+      })
     }
 
     sortRegularRows(tokens)
@@ -486,7 +526,7 @@ export function mountCategoryPicker(
     if (!listEl) return
     const rows = Array.from(
       listEl.querySelectorAll<HTMLElement>(
-        'button[role="option"][data-row-kind="regular"]'
+        '[role="option"][data-row-kind="regular"]'
       )
     )
     if (!rows.length) return
@@ -545,13 +585,13 @@ export function mountCategoryPicker(
       [CAT_FAVORITES, favs.size],
       [CAT_RECENTS, recs.length],
     ] as Array<[string, number]>) {
-      const btn = listEl.querySelector(
-        `button[role="option"][data-val="${val}"]`
+      const row = listEl.querySelector(
+        `[role="option"][data-val="${val}"]`
       ) as HTMLElement | null
-      if (!btn) continue
-      const countEl = btn.querySelector(".category-count")
+      if (!row) continue
+      const countEl = row.querySelector(".category-count")
       if (countEl) countEl.textContent = String(count)
-      btn.style.display = count > 0 ? "" : "none"
+      row.style.display = count > 0 ? "" : "none"
     }
   }
 
@@ -577,13 +617,13 @@ export function mountCategoryPicker(
     if (!pid || !listEl) return
     const allowed = new Set(allowedSet())
     for (const el of Array.from(
-      listEl.querySelectorAll('button[role="option"]')
+      listEl.querySelectorAll('[role="option"]')
     )) {
-      const btn = el as HTMLElement
-      const val = btn.dataset?.val
+      const row = el as HTMLElement
+      const val = row.dataset?.val
       if (!val) continue
       if (val.startsWith("__")) continue
-      if (btn.style.display === "none") continue
+      if (row.style.display === "none") continue
       allowed.add(val)
     }
     setAllowedCategories(pid, resolvedKind(), allowed)
@@ -611,18 +651,47 @@ export function mountCategoryPicker(
       setSyncEpgWithLive(pid, syncInput.checked)
       opts.onSyncToggle?.(syncInput.checked)
     })
-    document.addEventListener("xt:epg-sync-changed", (event: Event) => {
+    onDoc("xt:epg-sync-changed", (event: Event) => {
       const detail = (event as CustomEvent).detail
       if (!detail || detail.playlistId !== opts.getActivePlaylistId()) return
       syncInput.checked = !!detail.on
       syncModeToggle()
       renderList()
     })
-    document.addEventListener("xt:active-changed", () => {
+    onDoc("xt:active-changed", () => {
       reflectSync()
       syncModeToggle()
       renderList()
     })
+  }
+
+  // Mutate one row's "selected" state without rebuilding the whole list
+  const updateRowAllowedState = (categoryName: string, allowed: boolean): boolean => {
+    if (!listEl) return false
+    const row = listEl.querySelector<HTMLElement>(
+      `[role="option"][data-val="${CSS.escape(categoryName)}"]`,
+    )
+    if (!row) return false
+    const checkbox = row.querySelector<HTMLButtonElement>(".category-select-btn")
+    if (!checkbox) return false
+    checkbox.setAttribute("aria-checked", String(allowed))
+    checkbox.title = allowed
+      ? t("list.showingCategoryTitle")
+      : t("list.showCategoryTitle")
+    checkbox.setAttribute(
+      "aria-label",
+      allowed
+        ? t("list.removeFromShownAria", { label: categoryName })
+        : t("list.includeInShownAria", { label: categoryName }),
+    )
+    checkbox.className =
+      "category-select-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md " +
+      "border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent " +
+      (allowed
+        ? "bg-accent border-accent text-bg"
+        : "border-line text-fg-3 hover:text-fg hover:border-fg-3 focus-visible:border-fg-3")
+    checkbox.innerHTML = allowed ? CHECK_SVG : ""
+    return true
   }
 
   const onAnyPrefChange = (event: Event): void => {
@@ -631,12 +700,22 @@ export function mountCategoryPicker(
     if (detail.playlistId !== opts.getActivePlaylistId()) return
     const targetKind = resolvedKind()
     if (detail.kind !== targetKind) return
+
+    if (
+      event.type === "xt:allowed-categories-changed" &&
+      detail.categoryId != null &&
+      updateRowAllowedState(String(detail.categoryId), !!detail.allowed)
+    ) {
+      filterCategories()
+      return
+    }
+
     syncModeToggle()
     renderList()
   }
-  document.addEventListener("xt:hidden-categories-changed", onAnyPrefChange)
-  document.addEventListener("xt:allowed-categories-changed", onAnyPrefChange)
-  document.addEventListener("xt:category-mode-changed", onAnyPrefChange)
+  onDoc("xt:hidden-categories-changed", onAnyPrefChange)
+  onDoc("xt:allowed-categories-changed", onAnyPrefChange)
+  onDoc("xt:category-mode-changed", onAnyPrefChange)
 
   triggerEl?.addEventListener("click", () => {
     if (!dialog) return
@@ -653,7 +732,7 @@ export function mountCategoryPicker(
 
   listEl?.addEventListener("click", (event: Event) => {
     const target = event.target as HTMLElement
-    if (!target.closest("button[role='option']")) return
+    if (!target.closest("[role='option']")) return
     queueMicrotask(() => {
       if (dialog?.open) dialog.close()
     })
@@ -672,8 +751,11 @@ export function mountCategoryPicker(
     triggerEl?.focus()
   })
 
-  document.addEventListener(LOCALE_EVENT, syncLabel)
-  document.addEventListener(opts.activeCatChangedEvent, (event: Event) => {
+  onDoc(LOCALE_EVENT, () => {
+    syncLabel()
+    renderList()
+  })
+  onDoc(opts.activeCatChangedEvent, (event: Event) => {
     const next = ((event as CustomEvent).detail || "") as string
     if (next === activeCat) return
     setActiveCat(next, { silent: true })
@@ -696,5 +778,11 @@ export function mountCategoryPicker(
     allowedCategories: allowedSet,
     categoryMode,
     categoryPassesFilter,
+    destroy: () => {
+      for (const { event, fn } of docListeners) {
+        document.removeEventListener(event, fn)
+      }
+      docListeners.length = 0
+    },
   }
 }
