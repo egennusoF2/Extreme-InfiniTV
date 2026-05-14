@@ -67,9 +67,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_android_fs::init());
 
     builder
-        .setup(|app| {
+        .setup(|_app| {
+            #[cfg(not(target_os = "android"))]
             if cfg!(debug_assertions) {
-                app.handle().plugin(
+                _app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
@@ -78,11 +79,11 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             external_player::sweep_orphan_mpv_sockets();
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            tray::install(app)?;
+            tray::install(_app)?;
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 use tauri::Manager;
-                if let Some(main_window) = app.get_webview_window("main") {
+                if let Some(main_window) = _app.get_webview_window("main") {
                     if let Err(error) = main_window.set_decorations(false) {
                         log::warn!("[window] set_decorations(false) failed: {error}");
                     }

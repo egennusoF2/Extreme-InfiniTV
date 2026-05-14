@@ -176,10 +176,13 @@ import {
       THROUGHPUT_EVENT,
     } from "@/scripts/lib/downloads.js"
     import { getDownloadDir } from "@/scripts/lib/app-settings.js"
+    import { prettifyAndroidUri } from "@/scripts/lib/android-fs.js"
     import { injectVersion } from "@/scripts/version.js"
     import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
     import { t } from "@/scripts/lib/i18n.js"
     injectVersion()
+
+    const isAndroid = /Android/i.test(navigator.userAgent || "")
 
     // ----------------------------
     // DOM refs
@@ -216,9 +219,10 @@ import {
     function syncFolderSummary() {
       if (!folderPathEl) return
       const v = getDownloadDir() || ""
-      folderPathEl.textContent = v || t("downloads.folder.notSet")
-      folderPathEl.classList.toggle("text-fg-3", !v)
-      folderPathEl.classList.toggle("text-fg", !!v)
+      const display = isAndroid && v ? prettifyAndroidUri(v) : v
+      folderPathEl.textContent = display || t("downloads.folder.notSet")
+      folderPathEl.classList.toggle("text-fg-3", !display)
+      folderPathEl.classList.toggle("text-fg", !!display)
     }
     syncFolderSummary()
 

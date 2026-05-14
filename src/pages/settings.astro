@@ -2620,9 +2620,9 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
             else link.removeAttribute("aria-current")
           }
         }
-        try {
-          history.replaceState(null, "", `#${id}`)
-        } catch {}
+      }
+      const writeHash = (id: string) => {
+        try { history.replaceState(null, "", `#${id}`) } catch {}
       }
 
       const pickActive = (): string => {
@@ -2634,17 +2634,23 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
         if (scrollTop + clientHeight >= scrollHeight - 4) {
           return sections[sections.length - 1].id
         }
-        const anchorY = scrollTop + clientHeight * 0.22
-        const viewportTop = scrollTop
-        const viewportBottom = scrollTop + clientHeight
+        // Use viewport-relative rects: section.offsetTop is measured from the
+        // section's offsetParent, which is not always scrollEl - on Android
+        // WebView in particular the offsetParent chain differs, so offsetTop
+        // doesn't line up with scrollTop and the active id sticks.
+        const containerIsRoot =
+          el === document.scrollingElement || el === document.documentElement
+        const containerRect = containerIsRoot
+          ? { top: 0, bottom: clientHeight }
+          : el.getBoundingClientRect()
+        const anchorY = containerRect.top + clientHeight * 0.22
         let best = sections[0]
         let bestDistance = Infinity
         for (const section of sections) {
-          const top = section.offsetTop
-          const bottom = top + section.offsetHeight
-          if (bottom < viewportTop) continue
-          if (top > viewportBottom) break
-          const distance = Math.abs(top - anchorY)
+          const rect = section.getBoundingClientRect()
+          if (rect.bottom < containerRect.top) continue
+          if (rect.top > containerRect.bottom) break
+          const distance = Math.abs(rect.top - anchorY)
           if (distance < bestDistance) {
             bestDistance = distance
             best = section
@@ -2696,17 +2702,19 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
           event.preventDefault()
           scrollLock = true
           setActive(targetId)
+          writeHash(targetId)
           target.scrollIntoView({ behavior: "smooth", block: "start" })
           armScrollUnlock()
         })
       }
 
       // Deep-link from URL hash, else pick from current scroll position.
+      const hadInitialHash = !!location.hash
       const initialId =
         location.hash?.slice(1) || sections[0]?.id || ""
       if (initialId && linksById.has(initialId)) {
         setActive(initialId)
-        if (location.hash) {
+        if (hadInitialHash) {
           requestAnimationFrame(() => {
             document
               .getElementById(initialId)

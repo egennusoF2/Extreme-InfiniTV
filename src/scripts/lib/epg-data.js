@@ -555,10 +555,14 @@ async function readResponseAsXml(url, response) {
       "This browser/WebView can't decompress gzipped EPG payloads. Try a provider that serves plain XML."
     )
   }
-  const stream = new Blob([bytes])
-    .stream()
-    .pipeThrough(new DecompressionStream("gzip"))
-  return new Response(stream).text()
+  const sourceStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes)
+      controller.close()
+    },
+  })
+  const decompressed = sourceStream.pipeThrough(new DecompressionStream("gzip"))
+  return new Response(decompressed).text()
 }
 
 /**
@@ -577,6 +581,9 @@ async function fetchEpgConditional(url, meta) {
   if (meta?.lastModified) headers["If-Modified-Since"] = meta.lastModified
   if (meta?.etag) headers["If-None-Match"] = meta.etag
   const init = { forceTauri: true }
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    init.signal = AbortSignal.timeout(90_000)
+  }
   if (Object.keys(headers).length) init.headers = headers
   let response
   try {

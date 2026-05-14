@@ -228,7 +228,7 @@ const documentTitle = pageTitle
         <slot />
       </div>
     </div>
-    <CatalogWarmingIndicator client:load />
+    <CatalogWarmingIndicator client:idle />
   </body>
 </html>
 
@@ -572,15 +572,23 @@ const documentTitle = pageTitle
   window.addEventListener("focus", pruneDownloadsIfStale)
 
   window.addEventListener("load", function () {
-    SpatialNavigation.init()
-
-    SpatialNavigation.add({
-      id: "main",
-      selector:
-        "a, button, summary, input, textarea, [contenteditable='true'], select, [tabindex]:not([tabindex='-1'])",
-    })
-
-    SpatialNavigation.makeFocusable()
+    let snReady = false
+    const initSpatialNav = () => {
+      if (snReady) return
+      snReady = true
+      SpatialNavigation.init()
+      SpatialNavigation.add({
+        id: "main",
+        selector:
+          "a, button, summary, input, textarea, [contenteditable='true'], select, [tabindex]:not([tabindex='-1'])",
+      })
+      SpatialNavigation.makeFocusable()
+    }
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(initSpatialNav, { timeout: 2000 })
+    } else {
+      setTimeout(initSpatialNav, 500)
+    }
 
     const ARROWS = new Set([
       "ArrowUp",
@@ -590,6 +598,7 @@ const documentTitle = pageTitle
     ])
     const onFirstArrow = (e) => {
       if (!ARROWS.has(e.key)) return
+      initSpatialNav()
       const active = document.activeElement
       if (!active || active === document.body) {
         e.preventDefault()
