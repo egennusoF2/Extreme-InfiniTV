@@ -5,8 +5,8 @@ import {
   loadCreds,
   getActiveEntry,
   fmtBase,
-  buildApiUrl,
 } from "@/scripts/lib/creds.js"
+import { xtreamApiFetch, resolveStreamUrl } from "@/scripts/lib/xtream-api.js"
 import { getCached, setCached } from "@/scripts/lib/cache.js"
 import {
   ensureLoaded as ensurePrefsLoaded,
@@ -83,6 +83,7 @@ let activePlaylistId = ""
 let creds = { host: "", port: "", user: "", pass: "" }
 let movie = null
 let detailSrc = ""
+let detailSrcBuilder = null
 
 const setAmbient = (url) => setAmbientOn(ambientEl, url)
 const paintPoster = (name, logo) => paintPosterOn(posterEl, name, logo)
@@ -101,13 +102,26 @@ function youtubeUrlFromTrailer(trailer) {
   return ""
 }
 
-function fmtDuration(minsOrStr) {
-  if (!minsOrStr) return ""
-  const s = String(minsOrStr)
-  const m = parseInt(s, 10)
-  if (!isFinite(m) || m <= 0) return s
-  const h = Math.floor(m / 60)
-  const mm = m % 60
+function fmtDuration(value) {
+  if (value == null || value === "") return ""
+  const raw = String(value).trim()
+  if (!raw) return ""
+
+  let totalMin = 0
+  if (raw.includes(":")) {
+    const parts = raw.split(":").map((part) => parseInt(part, 10))
+    if (parts.some((part) => !Number.isFinite(part))) return raw
+    let totalSec = 0
+    if (parts.length === 3) totalSec = parts[0] * 3600 + parts[1] * 60 + parts[2]
+    else if (parts.length === 2) totalSec = parts[0] * 60 + parts[1]
+    else return raw
+    totalMin = Math.round(totalSec / 60)
+  } else {
+    totalMin = parseInt(raw, 10)
+  }
+  if (!Number.isFinite(totalMin) || totalMin <= 0) return raw
+  const h = Math.floor(totalMin / 60)
+  const mm = totalMin % 60
   if (!h) return `${mm} min`
   return `${h}h ${mm.toString().padStart(2, "0")}m`
 }
@@ -141,34 +155,41 @@ function applyVodInfo(data) {
   }
 
   let src = ""
+  let builder = null
   if (movieData.stream_url && /^https?:\/\//i.test(movieData.stream_url)) {
     src = movieData.stream_url
   } else if (movieData.stream_url) {
-    const base = fmtBase(creds.host, creds.port).replace(/\/+$/, "")
-    src = `${base}/${movieData.stream_url.replace(/^\/+/, "")}`
+    const relPath = movieData.stream_url.replace(/^\/+/, "")
+    builder = (c) => `${fmtBase(c.host, c.port).replace(/\/+$/, "")}/${relPath}`
+    src = builder(creds)
   } else if (creds.host && creds.user && creds.pass) {
     const rawExt =
       movieData.container_extension || info.container_extension || "mp4"
     const ext = String(rawExt).replace(/^\.+/, "").toLowerCase() || "mp4"
-    src =
-      fmtBase(creds.host, creds.port) +
+    builder = (c) =>
+      fmtBase(c.host, c.port) +
       "/movie/" +
-      encodeURIComponent(creds.user) +
+      encodeURIComponent(c.user) +
       "/" +
-      encodeURIComponent(creds.pass) +
+      encodeURIComponent(c.pass) +
       "/" +
       encodeURIComponent(movieId) +
       "." +
       ext
+    src = builder(creds)
   }
 
   detailSrc = src
+  detailSrcBuilder = builder
   applyDownloadState()
   externalBtnHandle?.refresh()
 
   const year = movieData.releasedate || movieData.year || info.year || ""
+  const durationSecs = Number(movieData.duration_secs || info.duration_secs || 0)
   const duration =
-    movieData.duration || info.duration || movieData.duration_secs || ""
+    movieData.duration ||
+    info.duration ||
+    (durationSecs > 0 ? Math.round(durationSecs / 60) : "")
   const rating =
     movieData.rating || info.rating || movieData.rating_5based || ""
   const genre = movieData.genre || info.genre || movieData.category || ""
@@ -321,6 +342,12 @@ async function startPlayback() {
   if (!detailSrc) {
     if (plotEl) plotEl.textContent = t("detail.error.noStream")
     return
+  }
+
+  // Probe the URL against the configured backup domains
+  if (detailSrcBuilder) {
+    const resolved = await resolveStreamUrl(detailSrcBuilder)
+    if (resolved) detailSrc = resolved
   }
 
   if (activePlaylistId) {
@@ -670,6 +697,7 @@ async function boot() {
 
   movie = null
   detailSrc = ""
+  detailSrcBuilder = null
   if (metaEl) metaEl.textContent = ""
   if (plotEl) plotEl.textContent = t("detail.loading")
 
@@ -734,9 +762,7 @@ async function boot() {
   // Refresh from network when reachable.
   if (creds.host && creds.user && creds.pass) {
     try {
-      const r = await providerFetch(
-        buildApiUrl(creds, "get_vod_info", { vod_id: String(movieId) })
-      )
+      const r = await xtreamApiFetch("get_vod_info", { vod_id: String(movieId) })
       if (!r.ok) throw new Error(await r.text())
       const data = await r.json()
       setCached(active._id, `vod_info_${movieId}`, data, VOD_INFO_TTL_MS)

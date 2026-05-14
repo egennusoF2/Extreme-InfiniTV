@@ -477,7 +477,8 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 0.25rem;
-    flex-shrink: 0;
+    min-width: 0;
+    max-width: 14rem;
   }
   .status-meta__version {
     font-size: 0.6875rem;
@@ -485,6 +486,10 @@
     color: var(--color-fg-3);
     font-variant-numeric: tabular-nums;
     padding-inline-end: 0.125rem;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .status-chip {

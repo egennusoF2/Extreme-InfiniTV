@@ -1,13 +1,13 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import { IconArrowLeft } from "@tabler/icons-svelte";
+import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 ---
 
 <Layout pageTitle="Add playlist">
 	<main
 		class="mx-auto px-5 sm:px-6 lg:px-8 pb-16 pt-4 lg:pt-6 max-w-480 w-full">
 
-		<div class="max-w-2xl mx-auto">
+		<div>
 
 		<header class="route-hero mb-10">
 			<a
@@ -34,7 +34,7 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		<div
 			role="tablist"
 			aria-label="Playlist type" data-i18n-attr="aria-label:aria.playlistType"
-			class="grid grid-cols-3 gap-1 p-1 rounded-xl border border-line bg-surface mb-10 max-w-2xl">
+			class="grid grid-cols-3 gap-1 p-1 rounded-xl border border-line bg-surface mb-10">
 			<button
 				id="tab-xtream"
 				type="button"
@@ -149,6 +149,92 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 						/>
 					</label>
 				</div>
+
+				<!-- Backup domains (Xtream only). Same disclosure pattern as the
+				     EPG sources block below so both advanced sections feel like
+				     one family. -->
+				<details id="mirrors-section" class="group rounded-xl border border-line bg-surface">
+					<summary
+						class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer
+							hover:bg-surface-2 focus-visible:bg-surface-2 transition-colors rounded-xl
+							list-none min-h-12">
+						<span class="flex flex-col gap-0.5 min-w-0">
+							<span data-i18n="login.mirrors.toggle" class="text-sm font-medium text-fg">
+								Backup domains (optional)
+							</span>
+							<span
+								data-i18n="login.mirrors.helper"
+								class="text-xs text-fg-3 leading-relaxed">
+								Providers often give a couple of domains. We'll fall back automatically when the primary stops responding.
+							</span>
+						</span>
+						<IconChevronDown
+							aria-hidden="true"
+							stroke={2}
+							class="size-4 shrink-0 text-fg-3 transition-[transform,color] duration-200
+								group-open:rotate-180 group-open:text-accent"
+						/>
+					</summary>
+
+					<div class="flex flex-col gap-3 px-4 pb-4 pt-1">
+						<ul id="mirrorsList" class="flex flex-col gap-3"></ul>
+						<button
+							id="mirrorsAddBtn"
+							type="button"
+							class="self-start inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-3 py-1.5 text-sm text-fg-2
+								hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
+							<IconPlus aria-hidden="true" stroke={2} class="size-3.5" />
+							<span data-i18n="login.mirrors.add">Add backup domain</span>
+						</button>
+					</div>
+				</details>
+
+				<!-- Advanced: live stream format (Xtream only). Most providers
+				     accept either; Dispatcharr only serves .ts today. -->
+				<details id="xtream-advanced" class="group rounded-xl border border-line bg-surface">
+					<summary
+						class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer
+							hover:bg-surface-2 focus-visible:bg-surface-2 transition-colors rounded-xl
+							list-none min-h-12">
+						<span class="flex flex-col gap-0.5 min-w-0">
+							<span data-i18n="login.advanced.toggle" class="text-sm font-medium text-fg">
+								Advanced playback (optional)
+							</span>
+							<span
+								data-i18n="login.advanced.helper"
+								class="text-xs text-fg-3 leading-relaxed">
+								Tweak how stream URLs are built. Only change if your provider needs it.
+							</span>
+						</span>
+						<IconChevronDown
+							aria-hidden="true"
+							stroke={2}
+							class="size-4 shrink-0 text-fg-3 transition-[transform,color] duration-200
+								group-open:rotate-180 group-open:text-accent"
+						/>
+					</summary>
+
+					<div class="flex flex-col gap-3 px-4 pb-4 pt-1">
+						<label class="flex flex-col gap-2">
+							<span
+								data-i18n="login.field.liveContainer"
+								class="text-eyebrow font-medium uppercase text-fg-3">
+								Live stream format
+							</span>
+							<select id="liveContainer" class="field-input">
+								<option value="m3u8" data-i18n="login.field.liveContainer.option.m3u8">
+									HLS (.m3u8)
+								</option>
+								<option value="ts" data-i18n="login.field.liveContainer.option.ts">
+									MPEG-TS (.ts)
+								</option>
+							</select>
+							<span data-i18n="login.field.liveContainer.helper" class="text-xs text-fg-3 leading-relaxed">
+								Most providers use HLS. Switch to MPEG-TS only if your provider can't serve .m3u8.
+							</span>
+						</label>
+					</div>
+				</details>
 			</div>
 
 			<!-- M3U fields -->
@@ -166,7 +252,7 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 						class="field-input"
 					/>
 					<span data-i18n="login.field.playlistUrl.helper" class="text-xs text-fg-3 leading-relaxed">
-						Must end with .m3u or .m3u8.
+						Any http(s) URL that serves an M3U playlist. Extensions optional.
 					</span>
 				</label>
 			</div>
@@ -204,6 +290,127 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					/>
 				</label>
 			</div>
+
+			<!-- Advanced: EPG sources (collapsed by default) -->
+			<details id="epg-sources" class="group rounded-xl border border-line bg-surface">
+				<summary
+					class="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer
+						hover:bg-surface-2 focus-visible:bg-surface-2 transition-colors rounded-xl
+						list-none min-h-12">
+					<span class="flex flex-col gap-0.5 min-w-0">
+						<span data-i18n="login.epg.advancedToggle" class="text-sm font-medium text-fg">
+							Custom EPG sources (optional)
+						</span>
+						<span
+							data-i18n="login.epg.advancedHelper"
+							class="text-xs text-fg-3 leading-relaxed">
+							Override the provider's XMLTV guide, or stack extra sources to fill missing channels.
+						</span>
+					</span>
+					<IconChevronDown
+						aria-hidden="true"
+						stroke={2}
+						class="size-4 shrink-0 text-fg-3 transition-[transform,color] duration-200
+							group-open:rotate-180 group-open:text-accent"
+					/>
+				</summary>
+
+				<div class="flex flex-col gap-5 px-4 pb-4 pt-1">
+					<!-- Primary override -->
+					<label class="flex flex-col gap-2">
+						<span
+							data-i18n="login.epg.primaryLabel"
+							class="text-eyebrow font-medium uppercase text-fg-3">
+							Primary EPG URL
+						</span>
+						<input
+							id="epgPrimary"
+							type="url"
+							placeholder="Leave empty to use the provider's default"
+							data-i18n-attr="placeholder:login.epg.primaryPlaceholder"
+							autocapitalize="off"
+							spellcheck="false"
+							inputmode="url"
+							class="field-input"
+						/>
+						<span
+							id="epgPrimaryStatus"
+							class="hidden text-xs leading-relaxed"></span>
+						<span data-i18n="login.epg.primaryHelper" class="text-xs text-fg-3 leading-relaxed">
+							XMLTV URL. Plain XML or gzipped (.xml.gz). Overrides the auto-detected source.
+						</span>
+					</label>
+
+					<!-- Additional sources -->
+					<div class="flex flex-col gap-2">
+						<span
+							data-i18n="login.epg.additionalLabel"
+							class="text-eyebrow font-medium uppercase text-fg-3">
+							Additional sources
+						</span>
+						<span data-i18n="login.epg.additionalHelper" class="text-xs text-fg-3 leading-relaxed">
+							Stacked in order. Each one fills channels the previous sources didn't supply - they never override the primary.
+						</span>
+						<ul id="epgAdditionalList" class="flex flex-col gap-2"></ul>
+					</div>
+
+					<div class="flex flex-col gap-2">
+						<div class="flex flex-wrap items-center gap-2">
+							<button
+								id="epgAddBtn"
+								type="button"
+								class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-3 py-1.5 text-sm text-fg-2
+									hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
+								<IconPlus aria-hidden="true" stroke={2} class="size-3.5" />
+								<span data-i18n="login.epg.addSource">Add another source</span>
+							</button>
+							<button
+								id="epgTestBtn"
+								type="button"
+								data-i18n="login.epg.testButton"
+								class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-3 py-1.5 text-sm text-fg-2
+									hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent transition-colors
+									disabled:opacity-50 disabled:cursor-not-allowed">
+								Test sources
+							</button>
+						</div>
+						<div
+							id="epgTestStatus"
+							class="hidden items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm leading-relaxed"></div>
+					</div>
+
+					<!-- Skip provider auto-default (Xtream only).
+					     Same shell pattern as the "Sync with Live TV" row in
+					     CategoryPickerDialog so cross-page checkbox rows feel
+					     like one component. The :has(:checked) selector
+					     tinges the row accent when active so the user can
+					     see at a glance that the toggle is on, without
+					     squinting at the checkbox tick. -->
+					<label
+						id="epgDisableProviderRow"
+						class="flex items-start gap-2.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-fg-2 shrink-0
+							cursor-pointer hover:bg-surface-3 focus-within:border-accent transition-colors
+							has-[:checked]:border-accent has-[:checked]:bg-accent-soft/40">
+						<input
+							id="epgDisableProvider"
+							type="checkbox"
+							class="mt-0.5 size-4 accent-accent shrink-0"
+						/>
+						<span class="flex flex-col leading-tight min-w-0">
+							<span
+								data-i18n="login.epg.disableProviderLabel"
+								class="text-fg">
+								Don't use the provider's default EPG
+							</span>
+							<span
+								data-i18n="login.epg.disableProviderHelper"
+								class="text-xs text-fg-3">
+								Skip the auto-detected source. Only the URLs above will be used - lets you verify a custom EPG works on its own.
+							</span>
+						</span>
+					</label>
+				</div>
+			</details>
 
 			<!-- Status -->
 			<div
@@ -253,10 +460,18 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		readLocalM3UContent,
 		isTauri,
 	} from "@/scripts/lib/creds.js";
-	import { t } from "@/scripts/lib/i18n.js";
+	import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js";
 	import { parseM3U } from "@/scripts/lib/m3u-parser.ts";
 	import { isAndroidFsActive, pickM3UFile } from "@/scripts/lib/android-fs.js";
 	import { log } from "@/scripts/lib/log.js";
+	import {
+		invalidateEpgPlaylist,
+		EPG_SOURCE_STATUS_EVENT,
+		testEpgSource,
+	} from "@/scripts/lib/epg-data.js";
+	import { ICON_X } from "@/scripts/lib/icons.ts";
+
+	const EPG_URL_RX = /^https?:\/\/[^\s]+$/i;
 
 	const MAX_LOCAL_M3U_BYTES = 25 * 1024 * 1024; // 25 MiB
 
@@ -282,8 +497,435 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 	const pageTitle = $("page-title");
 	const pageSubtitle = $("page-subtitle");
 
+	const epgDetails = $("epg-sources");
+	const epgPrimaryEl = /** @type {HTMLInputElement} */ ($("epgPrimary"));
+	const epgPrimaryStatus = $("epgPrimaryStatus");
+	const epgListEl = $("epgAdditionalList");
+	const epgAddBtn = $("epgAddBtn");
+
+	const mirrorsDetails = $("mirrors-section");
+	const mirrorsListEl = $("mirrorsList");
+	const mirrorsAddBtn = $("mirrorsAddBtn");
+	const xtreamAdvancedDetails = $("xtream-advanced");
+	const liveContainerEl = /** @type {HTMLSelectElement} */ ($("liveContainer"));
+	const epgTestBtn = $("epgTestBtn");
+	const epgTestStatus = $("epgTestStatus");
+	const epgDisableProviderRow = $("epgDisableProviderRow");
+	const epgDisableProviderEl = /** @type {HTMLInputElement} */ ($("epgDisableProvider"));
+	let epgTestAbort = null;
+
 	/** @type {{ name: string, text: string } | null} */
 	let pickedLocal = null;
+
+	function readEpgUrlsFromForm() {
+		const primary = (epgPrimaryEl?.value || "").trim();
+		const additional = [];
+		const inputs = epgListEl?.querySelectorAll("input[data-role='epg-additional']") || [];
+		for (const input of inputs) {
+			const value = (/** @type {HTMLInputElement} */ (input).value || "").trim();
+			if (value) additional.push(value);
+		}
+		return { primary, additional };
+	}
+
+	function setEpgError(el, key) {
+		if (!el) return;
+		el.classList.remove("text-bad", "text-good", "text-warn");
+		if (!key) {
+			el.classList.add("hidden");
+			el.textContent = "";
+			el.removeAttribute("data-i18n");
+			return;
+		}
+		el.classList.remove("hidden");
+		el.classList.add("text-bad");
+		el.setAttribute("data-i18n", key);
+		el.textContent = t(key);
+	}
+
+	function validateEpgUrlInputs() {
+		setEpgError(epgPrimaryStatus, null);
+		const primary = (epgPrimaryEl?.value || "").trim();
+		if (primary && !EPG_URL_RX.test(primary)) {
+			setEpgError(epgPrimaryStatus, "login.epg.invalidUrl");
+			return false;
+		}
+		const seen = new Set();
+		if (primary) seen.add(primary);
+		let ok = true;
+		const rows = epgListEl?.querySelectorAll("[data-role='epg-row']") || [];
+		for (const row of rows) {
+			const input = /** @type {HTMLInputElement} */ (row.querySelector("input"));
+			const statusSpan = row.querySelector("[data-role='epg-row-status']");
+			if (!input || !statusSpan) continue;
+			statusSpan.classList.add("hidden");
+			statusSpan.classList.remove("text-bad", "text-good", "text-warn");
+			statusSpan.removeAttribute("data-i18n");
+			statusSpan.textContent = "";
+			const value = input.value.trim();
+			if (!value) continue;
+			if (!EPG_URL_RX.test(value)) {
+				statusSpan.classList.remove("hidden");
+				statusSpan.classList.add("text-bad");
+				statusSpan.setAttribute("data-i18n", "login.epg.invalidUrl");
+				statusSpan.textContent = t("login.epg.invalidUrl");
+				ok = false;
+				continue;
+			}
+			if (seen.has(value)) {
+				statusSpan.classList.remove("hidden");
+				statusSpan.classList.add("text-warn");
+				statusSpan.setAttribute("data-i18n", "login.epg.duplicateUrl");
+				statusSpan.textContent = t("login.epg.duplicateUrl");
+				ok = false;
+				continue;
+			}
+			seen.add(value);
+		}
+		return ok;
+	}
+
+	function makeRemoveBtn(row) {
+		const btn = document.createElement("button");
+		btn.type = "button";
+		btn.className =
+			"shrink-0 rounded-md min-h-11 min-w-11 text-base text-fg-3 hover:text-bad hover:bg-bad/10 focus-visible:text-bad focus-visible:bg-bad/10 inline-flex items-center justify-center transition-colors outline-none";
+		btn.setAttribute("aria-label", t("login.epg.removeSource"));
+		btn.setAttribute("data-i18n-attr", "aria-label:login.epg.removeSource");
+		btn.innerHTML = ICON_X;
+		btn.addEventListener("click", () => {
+			row.remove();
+			validateEpgUrlInputs();
+		});
+		return btn;
+	}
+
+	function addEpgRow(initialValue = "") {
+		if (!epgListEl) return;
+		const row = document.createElement("li");
+		row.dataset.role = "epg-row";
+		row.className = "flex flex-col gap-1";
+
+		const inputRow = document.createElement("div");
+		inputRow.className = "flex items-center gap-2";
+
+		const input = document.createElement("input");
+		input.type = "url";
+		input.dataset.role = "epg-additional";
+		input.placeholder = "https://example.com/epg.xml.gz";
+		input.autocapitalize = "off";
+		input.spellcheck = false;
+		input.inputMode = "url";
+		input.className = "field-input flex-1 min-w-0";
+		input.value = initialValue;
+		input.addEventListener("blur", validateEpgUrlInputs);
+
+		const removeBtn = makeRemoveBtn(row);
+
+		inputRow.append(input, removeBtn);
+
+		const status = document.createElement("span");
+		status.dataset.role = "epg-row-status";
+		status.className = "hidden text-xs leading-relaxed pl-1";
+
+		row.append(inputRow, status);
+		epgListEl.appendChild(row);
+		window.SpatialNavigation?.makeFocusable?.();
+		return row;
+	}
+
+	function paintSourceBadge(target, status) {
+		if (!target) return;
+		target.classList.remove("hidden", "text-bad", "text-good", "text-warn");
+		target.removeAttribute("data-i18n");
+		if (!status) {
+			target.classList.add("hidden");
+			target.textContent = "";
+			return;
+		}
+		if (status.status === "ok") {
+			target.classList.add("text-good");
+			const key = "login.epg.sourceStatusOk";
+			target.setAttribute("data-i18n", key);
+			target.textContent = t(key, { count: (status.count || 0).toLocaleString() });
+		} else {
+			target.classList.add("text-bad");
+			target.textContent = t("login.epg.sourceStatusError", {
+				error: status.error || "Unknown error",
+			});
+		}
+	}
+
+	function applySourceStatuses(detail) {
+		if (!editing || !detail || detail.playlistId !== editing._id) return;
+		const sources = Array.isArray(detail.sources) ? detail.sources : [];
+		if (!sources.length) return;
+
+		const primary = sources.find((source) => source.kind === "primary");
+		// Only paint a primary badge when the user has actually set an override.
+		if (primary && (epgPrimaryEl?.value || "").trim() === primary.url) {
+			paintSourceBadge(epgPrimaryStatus, primary);
+		} else {
+			paintSourceBadge(epgPrimaryStatus, null);
+		}
+
+		const additional = sources.filter((source) => source.kind === "additional");
+		const rows = Array.from(
+			epgListEl?.querySelectorAll("[data-role='epg-row']") || []
+		);
+		for (const row of rows) {
+			const input = /** @type {HTMLInputElement} */ (row.querySelector("input"));
+			const statusEl = row.querySelector("[data-role='epg-row-status']");
+			const value = (input?.value || "").trim();
+			const match = additional.find((source) => source.url === value);
+			paintSourceBadge(statusEl, match || null);
+		}
+	}
+
+	epgAddBtn?.addEventListener("click", () => addEpgRow(""));
+
+	function readMirrorsFromForm() {
+		const rows = mirrorsListEl?.querySelectorAll("[data-role='mirror-row']") || [];
+		const out = [];
+		const primaryUser = (userEl?.value || "").trim();
+		const primaryPass = (passEl?.value || "").trim();
+		for (const row of rows) {
+			const serverInput = /** @type {HTMLInputElement} */ (row.querySelector("[data-role='mirror-server']"));
+			const userInput = /** @type {HTMLInputElement} */ (row.querySelector("[data-role='mirror-user']"));
+			const passInput = /** @type {HTMLInputElement} */ (row.querySelector("[data-role='mirror-pass']"));
+			const serverUrl = (serverInput?.value || "").trim();
+			if (!serverUrl) continue;
+			const username = (userInput?.value || "").trim() || primaryUser;
+			const password = (passInput?.value || "").trim() || primaryPass;
+			if (!username || !password) continue;
+			out.push({ serverUrl, username, password });
+		}
+		return out;
+	}
+
+	function addMirrorRow(initial = {}) {
+		if (!mirrorsListEl) return;
+		const row = document.createElement("li");
+		row.dataset.role = "mirror-row";
+		row.className = "flex flex-col gap-2 rounded-lg border border-line bg-surface-2 p-3";
+
+		const header = document.createElement("div");
+		header.className = "flex items-center justify-between gap-2";
+		const label = document.createElement("span");
+		label.className = "text-eyebrow font-medium uppercase text-fg-3";
+		label.setAttribute("data-i18n", "login.mirrors.rowLabel");
+		label.textContent = t("login.mirrors.rowLabel");
+		header.appendChild(label);
+
+		const removeBtn = document.createElement("button");
+		removeBtn.type = "button";
+		removeBtn.className =
+			"shrink-0 rounded-md min-h-11 min-w-11 text-base text-fg-3 hover:text-bad hover:bg-bad/10 focus-visible:text-bad focus-visible:bg-bad/10 inline-flex items-center justify-center transition-colors outline-none";
+		removeBtn.setAttribute("aria-label", t("login.mirrors.remove"));
+		removeBtn.setAttribute("data-i18n-attr", "aria-label:login.mirrors.remove");
+		removeBtn.innerHTML = ICON_X;
+		removeBtn.addEventListener("click", () => row.remove());
+		header.appendChild(removeBtn);
+
+		const serverInput = document.createElement("input");
+		serverInput.type = "text";
+		serverInput.dataset.role = "mirror-server";
+		serverInput.placeholder = "http://backup.example.com:8080";
+		serverInput.autocapitalize = "off";
+		serverInput.spellcheck = false;
+		serverInput.className = "field-input";
+		serverInput.value = initial.serverUrl || "";
+
+		const credRow = document.createElement("div");
+		credRow.className = "grid grid-cols-1 sm:grid-cols-2 gap-3";
+
+		const userInput = document.createElement("input");
+		userInput.type = "text";
+		userInput.dataset.role = "mirror-user";
+		userInput.autocapitalize = "off";
+		userInput.spellcheck = false;
+		userInput.placeholder = t("login.mirrors.userPlaceholder");
+		userInput.setAttribute("data-i18n-attr", "placeholder:login.mirrors.userPlaceholder");
+		userInput.className = "field-input";
+		userInput.value = initial.username || "";
+
+		const passInput = document.createElement("input");
+		passInput.type = "password";
+		passInput.dataset.role = "mirror-pass";
+		passInput.placeholder = t("login.mirrors.passPlaceholder");
+		passInput.setAttribute("data-i18n-attr", "placeholder:login.mirrors.passPlaceholder");
+		passInput.className = "field-input";
+		passInput.value = initial.password || "";
+
+		credRow.append(userInput, passInput);
+
+		// Mirror the primary "paste full player_api URL" auto-split behaviour.
+		serverInput.addEventListener("input", () => {
+			const parsed = parseXtreamUrl(serverInput.value.trim());
+			if (parsed) {
+				serverInput.value = parsed.serverUrl;
+				if (!userInput.value) userInput.value = parsed.username;
+				if (!passInput.value) passInput.value = parsed.password;
+			}
+		});
+
+		row.append(header, serverInput, credRow);
+		mirrorsListEl.appendChild(row);
+		window.SpatialNavigation?.makeFocusable?.();
+		return row;
+	}
+
+	mirrorsAddBtn?.addEventListener("click", () => {
+		const row = addMirrorRow();
+		row?.querySelector("input[data-role='mirror-server']")?.focus();
+	});
+	epgPrimaryEl?.addEventListener("blur", validateEpgUrlInputs);
+	document.addEventListener(EPG_SOURCE_STATUS_EVENT, (event) => {
+		applySourceStatuses(/** @type {CustomEvent} */ (event).detail);
+	});
+	document.addEventListener(LOCALE_EVENT, () => {
+		// Re-render i18n'd helper text on locale change.
+		validateEpgUrlInputs();
+	});
+
+	// Same palette + dot pattern as the connection-test status above so
+	// "Test sources" and "Test connection" read as one component family.
+	const EPG_TEST_PALETTE = {
+		good: "border-ok/30 bg-ok/10 text-ok",
+		warn: "border-warn/30 bg-warn/10 text-warn",
+		bad: "border-bad/30 bg-bad/10 text-bad",
+		busy: "border-line bg-surface text-fg-2",
+	};
+
+	function setEpgTestStatus(message, tone) {
+		if (!epgTestStatus) return;
+		epgTestStatus.removeAttribute("data-celebrate");
+		if (!message) {
+			epgTestStatus.classList.add("hidden");
+			epgTestStatus.classList.remove("flex");
+			epgTestStatus.innerHTML = "";
+			return;
+		}
+		epgTestStatus.classList.remove("hidden");
+		epgTestStatus.classList.add("flex");
+		const palette = EPG_TEST_PALETTE[tone] || EPG_TEST_PALETTE.busy;
+		epgTestStatus.className =
+			"flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm leading-relaxed " +
+			palette;
+		const dot = `<span aria-hidden="true" class="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-current shrink-0"></span>`;
+		epgTestStatus.innerHTML = `${dot}<span>${escapeText(message)}</span>`;
+	}
+
+	async function runEpgTest() {
+		if (!validateEpgUrlInputs()) {
+			setEpgTestStatus(t("login.epg.invalidUrl"), "bad");
+			return;
+		}
+		const { primary, additional } = readEpgUrlsFromForm();
+		const targets = [];
+		if (primary) {
+			targets.push({ url: primary, badge: epgPrimaryStatus });
+		}
+		const rows = Array.from(
+			epgListEl?.querySelectorAll("[data-role='epg-row']") || []
+		);
+		for (const row of rows) {
+			const input = /** @type {HTMLInputElement} */ (row.querySelector("input"));
+			const badge = row.querySelector("[data-role='epg-row-status']");
+			const value = (input?.value || "").trim();
+			if (!value) continue;
+			if (additional.includes(value)) {
+				targets.push({ url: value, badge });
+			}
+		}
+		if (!targets.length) {
+			setEpgTestStatus(t("login.epg.testNoSources"), "warn");
+			return;
+		}
+
+		// Cancel anything in-flight from a previous click.
+		if (epgTestAbort) {
+			try { epgTestAbort.abort(); } catch {}
+		}
+		epgTestAbort = new AbortController();
+		const signal = epgTestAbort.signal;
+
+		if (epgTestBtn) {
+			epgTestBtn.disabled = true;
+			epgTestBtn.removeAttribute("data-i18n");
+			epgTestBtn.textContent = t("login.epg.testButtonBusy");
+		}
+		setEpgTestStatus(
+			t("login.epg.testing", { count: targets.length.toLocaleString() }),
+			"busy"
+		);
+
+		// Mark each badge as in-flight before any awaits.
+		for (const target of targets) {
+			if (!target.badge) continue;
+			target.badge.classList.remove("hidden", "text-bad", "text-good", "text-warn");
+			target.badge.classList.add("text-fg-3");
+			target.badge.removeAttribute("data-i18n");
+			target.badge.textContent = t("login.epg.sourceFetching");
+		}
+
+		const results = await Promise.all(
+			targets.map((target) =>
+				testEpgSource(target.url, { signal }).then((res) => ({ target, res }))
+			)
+		);
+
+		if (signal.aborted) return;
+
+		let okCount = 0;
+		let errCount = 0;
+		for (const { target, res } of results) {
+			if (!target.badge) continue;
+			target.badge.classList.remove("text-fg-3", "text-bad", "text-good", "text-warn");
+			target.badge.removeAttribute("data-i18n");
+			if (res.ok) {
+				okCount++;
+				target.badge.classList.remove("hidden");
+				target.badge.classList.add("text-good");
+				target.badge.textContent = t("login.epg.sourceStatusOk", {
+					count: (res.count || 0).toLocaleString(),
+				});
+			} else {
+				errCount++;
+				target.badge.classList.remove("hidden");
+				target.badge.classList.add("text-bad");
+				target.badge.textContent = t("login.epg.sourceStatusError", {
+					error: res.error || "Unknown error",
+				});
+			}
+		}
+
+		if (epgTestBtn) {
+			epgTestBtn.disabled = false;
+			epgTestBtn.setAttribute("data-i18n", "login.epg.testButton");
+			epgTestBtn.textContent = t("login.epg.testButton");
+		}
+		setEpgTestStatus(
+			t("login.epg.testDone", {
+				ok: okCount.toLocaleString(),
+				total: targets.length.toLocaleString(),
+			}),
+			errCount === 0 ? "good" : okCount === 0 ? "bad" : "warn"
+		);
+		if (errCount === 0 && epgTestStatus) {
+			void epgTestStatus.offsetWidth;
+			epgTestStatus.setAttribute("data-celebrate", "true");
+		}
+		epgTestAbort = null;
+	}
+	epgTestBtn?.addEventListener("click", () => {
+		runEpgTest();
+	});
+
+	function refreshDisableProviderVisibility() {
+		if (!epgDisableProviderRow) return;
+		epgDisableProviderRow.style.display = mode === "xtream" ? "" : "none";
+	}
 
 	const params = new URLSearchParams(location.search);
 	const editingId = params.get("edit");
@@ -315,6 +957,8 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 			void shown.offsetWidth;
 			shown.classList.add("fade-section");
 		}
+
+		refreshDisableProviderVisibility();
 
 		applyTabStyles(tabXtream, isX);
 		applyTabStyles(tabM3u, isM);
@@ -502,8 +1146,13 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 			busy: "border-line bg-surface text-fg-2",
 		};
 		statusEl.className += palette[kind] || palette.info;
-		const dot = `<span aria-hidden="true" class="mt-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current shrink-0"></span>`;
-		statusEl.innerHTML = `${dot}<span>${escapeText(message)}</span>`;
+		// `mt-2` (8px) lines the dot up with the first-line optical centre for
+		// `text-sm leading-relaxed` (line-height ~22.75px). The earlier `mt-1.5`
+		// looked too high on single-line messages.
+		const dot = `<span aria-hidden="true" class="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-current shrink-0"></span>`;
+		const isMultiline = typeof message === "string" && message.includes("\n");
+		const bodyClass = isMultiline ? ' class="whitespace-pre-line"' : "";
+		statusEl.innerHTML = `${dot}<span${bodyClass}>${escapeText(message)}</span>`;
 		if (wasHidden) {
 			statusEl.classList.remove("status-enter");
 			void statusEl.offsetWidth;
@@ -537,6 +1186,32 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		return "";
 	}
 
+	function describeCandidateResult(result, serverUrl) {
+		const exp = result.expDate
+			? t("login.status.expiresOn", { date: new Date(result.expDate).toLocaleDateString() })
+			: "";
+		switch (result.status) {
+			case "active":
+				return t("login.status.connected") + exp;
+			case "expired":
+				return t("login.status.expired") + exp;
+			case "inactive":
+				return t("login.status.inactive") + exp;
+			default:
+				return t("login.status.serverUnreachable")
+					+ (result.message ? ` - ${result.message}` : ".")
+					+ privateHostHint(serverUrl);
+		}
+	}
+
+	// Rank candidate verdicts: active > expired > inactive > unavailable.
+	function statusRank(status) {
+		if (status === "active") return 3;
+		if (status === "expired") return 2;
+		if (status === "inactive") return 1;
+		return 0;
+	}
+
 	testBtn.addEventListener("click", async () => {
 		testBtn.disabled = true;
 		try {
@@ -551,30 +1226,49 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					);
 					return;
 				}
+				const candidates = [
+					{ label: t("login.mirrors.primaryLabel"), serverUrl, username, password },
+					...readMirrorsFromForm().map((mirror, idx) => ({
+						label: t("login.mirrors.candidateLabel", { n: idx + 1 }),
+						...mirror,
+					})),
+				];
 				showStatus("busy", t("login.status.testing"));
-				const r = await testXtreamConnection({
-					serverUrl,
-					username,
-					password,
-				});
-				const exp = r.expDate
-					? t("login.status.expiresOn", { date: new Date(r.expDate).toLocaleDateString() })
-					: "";
-				switch (r.status) {
-					case "active":
-						showStatus("active", t("login.status.connected") + exp);
-						break;
-					case "expired":
-						showStatus("expired", t("login.status.expired") + exp);
-						break;
-					case "inactive":
-						showStatus("inactive", t("login.status.inactive") + exp);
-						break;
-					default:
-						showStatus(
-							"unavailable",
-							t("login.status.serverUnreachable") + (r.message ? ` - ${r.message}` : ".") + privateHostHint(serverUrl)
-						);
+				const results = await Promise.all(
+					candidates.map((cand) =>
+						testXtreamConnection({
+							serverUrl: cand.serverUrl,
+							username: cand.username,
+							password: cand.password,
+						})
+					)
+				);
+
+				// Single-candidate path keeps the old single-line message.
+				if (candidates.length === 1) {
+					const result = results[0];
+					showStatus(
+						result.status === "active" ? "active"
+							: result.status === "expired" ? "expired"
+							: result.status === "inactive" ? "inactive"
+							: "unavailable",
+						describeCandidateResult(result, candidates[0].serverUrl)
+					);
+				} else {
+					// Aggregate verdict = best candidate. Body lists each.
+					let bestRank = -1;
+					let bestStatus = "unavailable";
+					for (const result of results) {
+						const rank = statusRank(result.status);
+						if (rank > bestRank) {
+							bestRank = rank;
+							bestStatus = result.status === "unavailable" ? "unavailable" : result.status;
+						}
+					}
+					const lines = candidates.map((cand, idx) =>
+						`${cand.label}: ${describeCandidateResult(results[idx], cand.serverUrl)}`
+					);
+					showStatus(bestStatus, lines.join("\n"));
 				}
 			} else {
 				const url = m3uEl.value.trim();
@@ -606,6 +1300,23 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		e.preventDefault();
 		saveBtn.disabled = true;
 		try {
+			if (!validateEpgUrlInputs()) {
+				epgDetails?.setAttribute("open", "");
+				showStatus("unavailable", t("login.epg.invalidUrl"));
+				return;
+			}
+			const { primary: epgUrl, additional: additionalEpgUrls } =
+				readEpgUrlsFromForm();
+			const disableProviderEpg =
+				mode === "xtream" ? !!epgDisableProviderEl?.checked : false;
+			let savedId = editing?._id || null;
+			const epgChanged =
+				editing &&
+				(editing.epgUrl !== epgUrl ||
+					JSON.stringify(editing.additionalEpgUrls || []) !==
+						JSON.stringify(additionalEpgUrls) ||
+					!!editing.disableProviderEpg !== disableProviderEpg);
+
 			if (mode === "xtream") {
 				const serverUrl = serverEl.value.trim();
 				const username = userEl.value.trim();
@@ -624,18 +1335,29 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					);
 					return;
 				}
+				const mirrors = readMirrorsFromForm();
+				const liveContainer = liveContainerEl?.value === "ts" ? "ts" : "m3u8";
 				const patch = {
 					type: "xtream",
 					title: titleEl.value.trim() || "",
 					serverUrl,
 					username,
 					password,
+					mirrors,
+					liveContainer,
+					epgUrl,
+					additionalEpgUrls,
+					disableProviderEpg,
 				};
-				if (editing) await updateEntry(editing._id, patch);
-				else await addEntry(patch);
+				if (editing) {
+					await updateEntry(editing._id, patch);
+				} else {
+					const saved = await addEntry(patch);
+					savedId = saved._id;
+				}
 			} else if (mode === "m3u") {
 				const url = m3uEl.value.trim();
-				if (!/^https?:\/\/[^\s]+\.m3u8?(\?.*)?$/i.test(url)) {
+				if (!/^https?:\/\//i.test(url)) {
 					showStatus(
 						"unavailable",
 						t("login.status.m3uScheme")
@@ -646,9 +1368,15 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					type: "m3u",
 					title: titleEl.value.trim() || "",
 					url,
+					epgUrl,
+					additionalEpgUrls,
 				};
-				if (editing) await updateEntry(editing._id, patch);
-				else await addEntry(patch);
+				if (editing) {
+					await updateEntry(editing._id, patch);
+				} else {
+					const saved = await addEntry(patch);
+					savedId = saved._id;
+				}
 			} else {
 				if (!pickedLocal || !pickedLocal.text) {
 					showStatus("unavailable", t("login.status.localPickFirst"));
@@ -660,9 +1388,10 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					title: titleEl.value.trim() || pickedLocal.name.replace(/\.(m3u8?|M3U8?)$/, ""),
 					content: pickedLocal.text,
 					sourceName: pickedLocal.name,
-					epgUrl: parsed.epgUrl || "",
+					// Preserve any user-supplied override
+					epgUrl: epgUrl || parsed.epgUrl || "",
+					additionalEpgUrls,
 				};
-				let savedId = editing?._id || null;
 				if (editing) {
 					await updateEntry(editing._id, patch);
 				} else {
@@ -683,6 +1412,14 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 					}
 				}
 			}
+
+			// Force a fresh EPG load on next visit if the user changed any
+			// source URL. Drops memCache + per-URL HTTP validators + IDB so
+			// the next loadProgrammes() refetches all sources cleanly.
+			if (savedId && (epgChanged || !editing)) {
+				invalidateEpgPlaylist(savedId);
+			}
+
 			location.href = editing ? "/" : "/livetv";
 		} finally {
 			saveBtn.disabled = false;
@@ -706,10 +1443,36 @@ import { IconArrowLeft } from "@tabler/icons-svelte";
 		tabLocal.disabled = editing.type !== "local-m3u";
 		setMode(editing.type);
 		titleEl.value = editing.title || "";
+		if (epgPrimaryEl) epgPrimaryEl.value = editing.epgUrl || "";
+		const additional = Array.isArray(editing.additionalEpgUrls)
+			? editing.additionalEpgUrls
+			: [];
+		for (const url of additional) addEpgRow(url);
+		if (epgDisableProviderEl) {
+			epgDisableProviderEl.checked = !!editing.disableProviderEpg;
+		}
+		// Open the disclosure when there's already something to see; keeps it
+		// out of the way on fresh-add.
+		if (
+			editing.epgUrl ||
+			additional.length ||
+			editing.disableProviderEpg
+		) {
+			epgDetails?.setAttribute("open", "");
+		}
 		if (editing.type === "xtream") {
 			serverEl.value = editing.serverUrl || "";
 			userEl.value = editing.username || "";
 			passEl.value = editing.password || "";
+			const mirrors = Array.isArray(editing.mirrors) ? editing.mirrors : [];
+			for (const mirror of mirrors) addMirrorRow(mirror);
+			if (mirrors.length) mirrorsDetails?.setAttribute("open", "");
+			if (liveContainerEl) {
+				liveContainerEl.value = editing.liveContainer === "ts" ? "ts" : "m3u8";
+			}
+			if (editing.liveContainer === "ts") {
+				xtreamAdvancedDetails?.setAttribute("open", "");
+			}
 		} else if (editing.type === "m3u") {
 			m3uEl.value = editing.url || "";
 		} else {

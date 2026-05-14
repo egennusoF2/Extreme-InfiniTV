@@ -196,7 +196,7 @@
   <div
     class="warming-strip fixed left-0 right-0 z-10000 flex items-center gap-2.5 px-3 py-1.5
            bg-bg/95 border-b border-line text-2xs text-fg-2 backdrop-blur-md"
-    style="top: env(safe-area-inset-top, 0)"
+    style="top: calc(env(safe-area-inset-top, 0px) + var(--xt-titlebar-h, 0px))"
     role="status"
     aria-live="polite">
     <span class="warming-strip__label inline-flex items-center gap-2">

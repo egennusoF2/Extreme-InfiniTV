@@ -86,6 +86,18 @@ describe("buildMpvArgs", () => {
     expect(args).not.toContain("   ")
     expect(args).not.toContain("\t")
   })
+
+  it("forces UDP-first RTSP transport for rtsp:// URLs", () => {
+    const args = buildMpvArgs({
+      src: "rtsp://192.168.178.1:554/?avm=1&freq=418&msys=dvbc",
+    })
+    expect(args).toContain("--demuxer-lavf-o=rtsp_transport=udp+tcp")
+  })
+
+  it("does not add the RTSP transport flag for http(s) URLs", () => {
+    const args = buildMpvArgs({ src: SRC })
+    expect(args.some((arg) => arg.includes("rtsp_transport"))).toBe(false)
+  })
 })
 
 describe("buildVlcArgs", () => {

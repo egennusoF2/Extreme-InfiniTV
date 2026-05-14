@@ -16,8 +16,9 @@
 //   - Canvas2D context unavailable
 
 const CYCLE_MS = 6000
-const TRAIL_SAMPLES = 52
+const TRAIL_SAMPLES = 32
 const TRAIL_LENGTH_FRAC = 0.2
+const PATH_CACHE_SAMPLES = 256
 
 const ACCENT_FALLBACK: [number, number, number] = [0.91, 0.5, 0.78]
 
@@ -48,28 +49,27 @@ function parseAccent(): [number, number, number] {
 export function setupSplashComet(splash: HTMLElement): () => void {
   const canvas = splash.querySelector(".xt-app-splash__comet") as HTMLCanvasElement | null
   const pathEl = splash.querySelector("#xt-app-splash-path") as SVGPathElement | null
-  const svgEl = splash.querySelector(".xt-app-splash__svg") as SVGSVGElement | null
-  if (!canvas || !pathEl) return () => {}
+  if (!canvas || !pathEl) return () => { }
 
   const reduced =
     window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
     document.documentElement.getAttribute("data-perf-mode") === "on"
   if (reduced) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   const ctx = canvas.getContext("2d", { alpha: true })
   if (!ctx) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   let pathLen = 0
-  try { pathLen = pathEl.getTotalLength() } catch {}
+  try { pathLen = pathEl.getTotalLength() } catch { }
   if (pathLen <= 0) {
     canvas.style.display = "none"
-    return () => {}
+    return () => { }
   }
 
   const accent = parseAccent()
@@ -78,7 +78,58 @@ export function setupSplashComet(splash: HTMLElement): () => void {
   const ab = Math.round(accent[2] * 255)
   const accentStr = `${ar}, ${ag}, ${ab}`
 
+  // Pre-sample the SVG path in user units once
+  const pathXs = new Float32Array(PATH_CACHE_SAMPLES)
+  const pathYs = new Float32Array(PATH_CACHE_SAMPLES)
+  for (let cacheIdx = 0; cacheIdx < PATH_CACHE_SAMPLES; cacheIdx++) {
+    const point = pathEl.getPointAtLength((cacheIdx / PATH_CACHE_SAMPLES) * pathLen)
+    pathXs[cacheIdx] = point.x
+    pathYs[cacheIdx] = point.y
+  }
+  const samplePath = (dist: number): { x: number; y: number } => {
+    let normalized = dist / pathLen
+    normalized = normalized - Math.floor(normalized)
+    const floatIdx = normalized * PATH_CACHE_SAMPLES
+    const lowIdx = Math.floor(floatIdx)
+    const highIdx = (lowIdx + 1) % PATH_CACHE_SAMPLES
+    const frac = floatIdx - lowIdx
+    return {
+      x: pathXs[lowIdx] + (pathXs[highIdx] - pathXs[lowIdx]) * frac,
+      y: pathYs[lowIdx] + (pathYs[highIdx] - pathYs[lowIdx]) * frac,
+    }
+  }
+
   const dpr = Math.min(window.devicePixelRatio || 1, 2)
+
+  // Pre-render the head halo and core as offscreen sprites
+  const haloR = 16 * dpr
+  const coreR = 3.4 * dpr
+  const buildSprite = (
+    radius: number,
+    stops: Array<[number, string]>,
+  ): HTMLCanvasElement => {
+    const sprite = document.createElement("canvas")
+    const side = Math.ceil(radius * 2)
+    sprite.width = side
+    sprite.height = side
+    const spriteCtx = sprite.getContext("2d")
+    if (!spriteCtx) return sprite
+    const gradient = spriteCtx.createRadialGradient(radius, radius, 0, radius, radius, radius)
+    for (const [stop, color] of stops) gradient.addColorStop(stop, color)
+    spriteCtx.fillStyle = gradient
+    spriteCtx.fillRect(0, 0, side, side)
+    return sprite
+  }
+  const haloSprite = buildSprite(haloR, [
+    [0, `rgba(${accentStr}, 0.85)`],
+    [0.35, `rgba(${accentStr}, 0.30)`],
+    [1, `rgba(${accentStr}, 0)`],
+  ])
+  const coreSprite = buildSprite(coreR, [
+    [0, "rgba(255, 255, 255, 1)"],
+    [0.45, "rgba(255, 255, 255, 0.7)"],
+    [1, `rgba(${accentStr}, 0)`],
+  ])
   // SVG user units (viewBox 0-24) -> canvas pixels, plus an offset for the
   // SVG's position inside the (larger) canvas. The mark-wrap pads the canvas
   // out past the SVG so the comet's halo can bloom freely.
@@ -86,17 +137,25 @@ export function setupSplashComet(splash: HTMLElement): () => void {
   let offsetX = 0
   let offsetY = 0
 
+  const wrap = canvas.parentElement
   const resize = () => {
     const canvasRect = canvas.getBoundingClientRect()
     const cssW = canvasRect.width || 1
     const cssH = canvasRect.height || 1
     canvas.width = Math.max(1, Math.round(cssW * dpr))
     canvas.height = Math.max(1, Math.round(cssH * dpr))
-    if (svgEl) {
-      const svgRect = svgEl.getBoundingClientRect()
-      offsetX = (svgRect.left - canvasRect.left) * dpr
-      offsetY = (svgRect.top - canvasRect.top) * dpr
-      userToPx = (svgRect.width / 24) * dpr
+    if (wrap) {
+      const wrapRect = wrap.getBoundingClientRect()
+      const style = getComputedStyle(wrap)
+      const padLeft = parseFloat(style.paddingLeft) || 0
+      const padTop = parseFloat(style.paddingTop) || 0
+      const padRight = parseFloat(style.paddingRight) || 0
+      const padBottom = parseFloat(style.paddingBottom) || 0
+      const contentW = Math.max(1, wrapRect.width - padLeft - padRight)
+      const contentH = Math.max(1, wrapRect.height - padTop - padBottom)
+      offsetX = (wrapRect.left + padLeft - canvasRect.left) * dpr
+      offsetY = (wrapRect.top + padTop - canvasRect.top) * dpr
+      userToPx = (Math.min(contentW, contentH) / 24) * dpr
     } else {
       offsetX = 0
       offsetY = 0
@@ -116,28 +175,34 @@ export function setupSplashComet(splash: HTMLElement): () => void {
   let rafId = 0
   let running = true
   const startTime = performance.now()
+  // Cap at 30 FPS
+  const FRAME_MIN_MS = 1000 / 30
+  let lastDrawTime = 0
 
   const draw = () => {
     if (!running) return
-    const elapsed = (performance.now() - startTime) % CYCLE_MS
+    const now = performance.now()
+    if (now - lastDrawTime < FRAME_MIN_MS) {
+      rafId = requestAnimationFrame(draw)
+      return
+    }
+    lastDrawTime = now
+    const elapsed = (now - startTime) % CYCLE_MS
     const headDist = (elapsed / CYCLE_MS) * pathLen
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.globalCompositeOperation = "lighter"
 
     // Trail (drawn tail-first so the head sample is the last/topmost layer).
-    for (let i = TRAIL_SAMPLES; i >= 1; i--) {
-      const t = i / TRAIL_SAMPLES // 0 at head, 1 at tail
-      let dist = headDist - t * TRAIL_LENGTH_FRAC * pathLen
-      while (dist < 0) dist += pathLen
-      while (dist >= pathLen) dist -= pathLen
-
-      const pt = pathEl.getPointAtLength(dist)
+    for (let trailIdx = TRAIL_SAMPLES; trailIdx >= 1; trailIdx--) {
+      const tailT = trailIdx / TRAIL_SAMPLES // 0 at head, 1 at tail
+      const dist = headDist - tailT * TRAIL_LENGTH_FRAC * pathLen
+      const pt = samplePath(dist)
       const x = offsetX + pt.x * userToPx
       const y = offsetY + pt.y * userToPx
 
-      const alpha = Math.pow(1 - t, 2.2) * 0.55
-      const radius = (2.4 - t * 2.0) * dpr
+      const alpha = Math.pow(1 - tailT, 2.2) * 0.55
+      const radius = (2.4 - tailT * 2.0) * dpr
       if (radius < 0.3) continue
 
       ctx.fillStyle = `rgba(${accentStr}, ${alpha})`
@@ -146,30 +211,12 @@ export function setupSplashComet(splash: HTMLElement): () => void {
       ctx.fill()
     }
 
-    // Head: accent halo + hot white core
-    const headPt = pathEl.getPointAtLength(headDist)
+    // Head: accent halo + hot white core, blitted from pre-rendered sprites.
+    const headPt = samplePath(headDist)
     const hx = offsetX + headPt.x * userToPx
     const hy = offsetY + headPt.y * userToPx
-
-    const haloR = 16 * dpr
-    const halo = ctx.createRadialGradient(hx, hy, 0, hx, hy, haloR)
-    halo.addColorStop(0, `rgba(${accentStr}, 0.85)`)
-    halo.addColorStop(0.35, `rgba(${accentStr}, 0.30)`)
-    halo.addColorStop(1, `rgba(${accentStr}, 0)`)
-    ctx.fillStyle = halo
-    ctx.beginPath()
-    ctx.arc(hx, hy, haloR, 0, Math.PI * 2)
-    ctx.fill()
-
-    const coreR = 3.4 * dpr
-    const core = ctx.createRadialGradient(hx, hy, 0, hx, hy, coreR)
-    core.addColorStop(0, "rgba(255, 255, 255, 1)")
-    core.addColorStop(0.45, "rgba(255, 255, 255, 0.7)")
-    core.addColorStop(1, `rgba(${accentStr}, 0)`)
-    ctx.fillStyle = core
-    ctx.beginPath()
-    ctx.arc(hx, hy, coreR, 0, Math.PI * 2)
-    ctx.fill()
+    ctx.drawImage(haloSprite, hx - haloR, hy - haloR)
+    ctx.drawImage(coreSprite, hx - coreR, hy - coreR)
 
     rafId = requestAnimationFrame(draw)
   }

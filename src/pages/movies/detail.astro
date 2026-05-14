@@ -15,7 +15,7 @@ import {
 <Layout pageTitle="Movie">
   <main class="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden custom-scroll">
     <div
-      class="relative w-full max-w-4xl mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12 flex flex-col gap-5 isolate">
+      class="relative w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12 flex flex-col gap-5 isolate">
 
       <div data-modal-ambient id="movie-detail-ambient" aria-hidden="true"></div>
 
@@ -49,7 +49,7 @@ import {
           <div
             id="movie-detail-poster"
             class="dt-hero aspect-2/3 sm:aspect-video w-full mx-auto overflow-hidden rounded-xl bg-surface-2 ring-1 ring-line
-                   max-h-[50dvh] max-w-[calc(50dvh*2/3)] sm:max-w-[calc(50dvh*16/9)]"
+                   max-h-[60dvh] max-w-[calc(60dvh*2/3)] sm:max-w-[calc(60dvh*16/9)]"
             style="view-transition-name: active-poster;">
           </div>
           <div
@@ -66,17 +66,17 @@ import {
         </div>
 
         <!-- Action buttons -->
-        <div class="dt-enter dt-stagger-2 flex flex-col sm:flex-row gap-2 justify-center">
+        <div class="dt-enter dt-stagger-2 flex flex-wrap justify-center items-center gap-2">
           <button
             id="movie-detail-play"
             type="button"
             class="dt-play-breath flex flex-col items-center justify-center gap-0 rounded-xl bg-accent text-bg
-                   px-6 py-2.5 text-base font-semibold min-w-44
+                   px-5 py-2 text-sm font-semibold min-w-44 min-h-11
                    hover:opacity-90 focus-visible:opacity-90
                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
                    active:scale-[0.97] transition duration-150">
             <span class="inline-flex items-center gap-2 leading-none">
-              <IconPlayerPlay aria-hidden="true" stroke={2} class="size-5" />
+              <IconPlayerPlay aria-hidden="true" stroke={2} class="btn-icon" />
               <span id="movie-detail-play-label">Play</span>
             </span>
             <span
@@ -89,28 +89,22 @@ import {
             hidden
             aria-label="Start from the beginning"
             data-i18n-attr="aria-label:detail.action.startOver"
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconRotate aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconRotate aria-hidden="true" stroke={2} class="btn-icon" />
             <span data-i18n="detail.action.startOver">Start over</span>
           </button>
           <button
             id="movie-detail-fav"
             type="button"
-            class="rounded-xl border border-line px-6 py-3 text-base min-w-44
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
+            class="btn">
             Add to favorites
           </button>
           <button
             id="movie-detail-watch"
             type="button"
             aria-pressed="false"
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconBookmark aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconBookmark aria-hidden="true" stroke={2} class="btn-icon" />
             <span id="movie-detail-watch-label">Watch later</span>
           </button>
           <button
@@ -119,47 +113,39 @@ import {
             hidden
             aria-label="Picture-in-Picture"
             data-i18n-attr="aria-label:detail.action.pip"
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconPictureInPicture aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconPictureInPicture aria-hidden="true" stroke={2} class="btn-icon" />
             <span data-i18n="detail.action.pip">Picture-in-Picture</span>
           </button>
           <button
             id="movie-detail-open-external"
             type="button"
             hidden
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconExternalLink aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconExternalLink aria-hidden="true" stroke={2} class="btn-icon" />
             <span data-label></span>
           </button>
           <button
             id="movie-detail-trailer"
             type="button"
             hidden
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconBrandYoutube aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconBrandYoutube aria-hidden="true" stroke={2} class="btn-icon" />
             <span data-i18n="detail.action.trailer">Trailer</span>
           </button>
           <button
             id="movie-detail-download"
             type="button"
             hidden
-            class="flex items-center justify-center gap-2 rounded-xl border border-line px-6 py-3 text-base min-w-44 text-fg-2
-                   hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-                   active:scale-[0.97] transition duration-150">
-            <IconDownload aria-hidden="true" stroke={2} class="size-5" />
+            class="btn">
+            <IconDownload aria-hidden="true" stroke={2} class="btn-icon" />
             <span id="movie-detail-download-label">Download</span>
           </button>
         </div>
 
         <div
           id="movie-detail-plot"
-          class="dt-enter dt-stagger-3 text-sm text-fg-2 leading-relaxed">
+          class="dt-enter dt-stagger-3 text-sm text-fg-2 leading-relaxed max-w-prose">
           Loading details…
         </div>
 

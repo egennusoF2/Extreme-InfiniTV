@@ -1,5 +1,6 @@
 ---
 import Sidebar from "@/components/Sidebar.astro"
+import TitleBar from "@/components/TitleBar.astro"
 import CatalogWarmingIndicator from "@/components/CatalogWarmingIndicator.svelte"
 import "../styles/global.css"
 
@@ -37,6 +38,10 @@ const documentTitle = pageTitle
           var uaPlatform = (navigator.userAgent || "").toLowerCase();
           if (uaPlatform.indexOf("android") !== -1) {
             document.documentElement.setAttribute("data-platform", "android");
+          }
+          var hasTauri = !!window.__TAURI_INTERNALS__ || !!window.__TAURI__;
+          if (hasTauri && uaPlatform.indexOf("android") === -1) {
+            document.documentElement.setAttribute("data-tauri-desktop", "1");
           }
         } catch (e) {}
         var cw = parseFloat(localStorage.getItem("xt_channels_w") || "");
@@ -96,7 +101,8 @@ const documentTitle = pageTitle
 
         // Translate [data-i18n*] elements before first paint
         if (storedLocale && storedLocale !== "en") {
-          var rawMessages = localStorage.getItem("xt_locale_messages_v1");
+          var rawMessages = localStorage.getItem("xt_locale_messages_v2");
+          try { localStorage.removeItem("xt_locale_messages_v1"); } catch (e) {}
           if (rawMessages) {
             var cached = JSON.parse(rawMessages);
             if (cached && cached.code === storedLocale && cached.messages) {
@@ -180,7 +186,7 @@ const documentTitle = pageTitle
   <body
     class="antialiased bg-bg text-fg selection:bg-accent-soft
            h-dvh min-h-0 overflow-hidden
-           flex flex-col md:flex-row landscape-phone:flex-row
+           flex flex-col
            pt-[env(safe-area-inset-top)]
            pr-[env(safe-area-inset-right)]"
   >
@@ -210,16 +216,30 @@ const documentTitle = pageTitle
         </span>
       </div>
     </div>
-    <Sidebar />
-    <div class="flex-1 min-w-0 min-h-0 flex flex-col order-first md:order-0
-                overflow-x-clip overflow-y-auto">
-      <slot />
+    <TitleBar />
+    <div
+      class="flex-1 min-h-0 flex flex-col md:flex-row landscape-phone:flex-row"
+    >
+      <Sidebar />
+      <div
+        class="flex-1 min-w-0 min-h-0 flex flex-col order-first md:order-0
+                overflow-x-clip overflow-y-auto"
+      >
+        <slot />
+      </div>
     </div>
-    <CatalogWarmingIndicator client:load />
+    <CatalogWarmingIndicator client:idle />
   </body>
 </html>
 
 <style is:global>
+  html[data-tauri-desktop] {
+    --xt-titlebar-h: 2.25rem;
+  }
+  html[data-tauri-desktop] body {
+    padding-top: var(--xt-titlebar-h);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -382,6 +402,7 @@ const documentTitle = pageTitle
   import { initKeyboardHelp } from "@/scripts/lib/keyboard-help.js"
   import { initI18n } from "@/scripts/lib/i18n.js"
   import { initConnectivity } from "@/scripts/lib/connectivity.js"
+  import { initTrayHandler } from "@/scripts/lib/tray-handler"
   import { setupSplashBackdrop } from "@/scripts/lib/splash-backdrop"
   import { setupSplashComet } from "@/scripts/lib/splash-comet"
   initI18n()
@@ -424,7 +445,7 @@ const documentTitle = pageTitle
       }
     }
 
-    const MIN_DISPLAY_MS = 1500
+    const MIN_DISPLAY_MS = 3000
     const start = performance.now()
     const remove = () => {
       cometCleanup()
@@ -493,6 +514,7 @@ const documentTitle = pageTitle
 
   initFocusGlide()
   initKeyboardHelp()
+  initTrayHandler()
 
   // -----------------------------------------------------------------------
   // Discord idle presence: push "Browsing the catalog" on every page load
@@ -550,15 +572,23 @@ const documentTitle = pageTitle
   window.addEventListener("focus", pruneDownloadsIfStale)
 
   window.addEventListener("load", function () {
-    SpatialNavigation.init()
-
-    SpatialNavigation.add({
-      id: "main",
-      selector:
-        "a, button, summary, input, textarea, [contenteditable='true'], select, [tabindex]:not([tabindex='-1'])",
-    })
-
-    SpatialNavigation.makeFocusable()
+    let snReady = false
+    const initSpatialNav = () => {
+      if (snReady) return
+      snReady = true
+      SpatialNavigation.init()
+      SpatialNavigation.add({
+        id: "main",
+        selector:
+          "a, button, summary, input, textarea, [contenteditable='true'], select, [tabindex]:not([tabindex='-1'])",
+      })
+      SpatialNavigation.makeFocusable()
+    }
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(initSpatialNav, { timeout: 2000 })
+    } else {
+      setTimeout(initSpatialNav, 500)
+    }
 
     const ARROWS = new Set([
       "ArrowUp",
@@ -568,6 +598,7 @@ const documentTitle = pageTitle
     ])
     const onFirstArrow = (e) => {
       if (!ARROWS.has(e.key)) return
+      initSpatialNav()
       const active = document.activeElement
       if (!active || active === document.body) {
         e.preventDefault()

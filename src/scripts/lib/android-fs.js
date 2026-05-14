@@ -58,6 +58,25 @@ export function deserializeUri(stored) {
   }
 }
 
+export function prettifyAndroidUri(stored) {
+  if (!stored) return ""
+  let raw = stored
+  try {
+    const parsed = JSON.parse(stored)
+    if (parsed && typeof parsed.uri === "string") raw = parsed.uri
+  } catch {}
+  try {
+    const decoded = decodeURIComponent(raw)
+    const match =
+      decoded.match(/document\/(?:tree\/)?([^/]+)$/) ||
+      decoded.match(/tree\/([^/]+)$/)
+    if (match && match[1]) return match[1].replace(/^primary:/, "")
+    return decoded
+  } catch {
+    return raw
+  }
+}
+
 export function isAndroidFsActive() {
   return isAndroid
 }

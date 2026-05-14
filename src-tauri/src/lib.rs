@@ -4,6 +4,9 @@ mod discord;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod external_player;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod tray;
+
 #[cfg(target_os = "android")]
 mod android_diagnostics {
     use std::sync::Once;
@@ -39,6 +42,8 @@ mod android_diagnostics {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
@@ -47,6 +52,7 @@ pub fn run() {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(discord::RpcState::default())
         .manage(external_player::ExternalPlayerState::default())
@@ -61,9 +67,10 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_android_fs::init());
 
     builder
-        .setup(|app| {
+        .setup(|_app| {
+            #[cfg(not(target_os = "android"))]
             if cfg!(debug_assertions) {
-                app.handle().plugin(
+                _app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
@@ -71,6 +78,20 @@ pub fn run() {
             }
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             external_player::sweep_orphan_mpv_sockets();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            tray::install(_app)?;
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                use tauri::Manager;
+                if let Some(main_window) = _app.get_webview_window("main") {
+                    if let Err(error) = main_window.set_decorations(false) {
+                        log::warn!("[window] set_decorations(false) failed: {error}");
+                    }
+                    if let Err(error) = main_window.set_shadow(true) {
+                        log::warn!("[window] set_shadow(true) failed: {error}");
+                    }
+                }
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

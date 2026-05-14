@@ -405,6 +405,24 @@ dialog[open]::backdrop {
     .field-input:disabled {
         @apply opacity-60 cursor-not-allowed;
     }
+    select.field-input {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23909090'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'%20width='14'%20height='14'%3E%3Cpath%20d='M6%209l6%206l6%20-6'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.875rem center;
+        padding-right: 2.25rem;
+        padding-inline-end: 2.25rem;
+    }
+    [dir="rtl"] select.field-input {
+        background-position: left 0.875rem center;
+        padding-right: 0.75rem;
+        padding-left: 2.25rem;
+    }
+    select.field-input::-ms-expand {
+        display: none;
+    }
 
     .btn-icon {
         @apply size-4 shrink-0;
@@ -532,6 +550,44 @@ dialog[open]::backdrop {
     contain-intrinsic-size: 68px;
     scroll-margin-block: 8px;
     position: relative;
+}
+
+.map-row,
+.pick-row {
+    content-visibility: auto;
+    contain-intrinsic-size: 56px;
+}
+
+.map-row[data-just-changed="true"] {
+    animation: map-row-flash 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes map-row-flash {
+    0%   { background-color: transparent; }
+    12%  { background-color: var(--color-accent-soft); }
+    100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .map-row[data-just-changed="true"] { animation: none; }
+}
+html[data-perf-mode="on"] .map-row[data-just-changed="true"] { animation: none; }
+
+#epgTestStatus[data-celebrate="true"] {
+    animation: epg-test-celebrate 1.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes epg-test-celebrate {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    20%      { box-shadow: 0 0 0 6px color-mix(in oklch, var(--color-ok) 22%, transparent); }
+    60%      { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #epgTestStatus[data-celebrate="true"] { animation: none; }
+}
+html[data-perf-mode="on"] #epgTestStatus[data-celebrate="true"] { animation: none; }
+
+/* Suppress Safari/iOS native disclosure triangle on `<summary class="list-none">`
+   - `list-style: none` alone leaves the marker visible in WebKit. */
+summary.list-none::-webkit-details-marker {
+    display: none;
 }
 
 /* ────────────────────────────── */
@@ -964,11 +1020,12 @@ dialog[open]::backdrop {
 }
 
 /* "Show selected only" toggle in the category picker - tick is hidden until
-   pressed; pressed fills the box with the accent. */
-#category-show-selected:not([aria-pressed="true"]) .cat-show-selected-tick {
+   pressed; pressed fills the box with the accent. Suffix selector so every
+   per-page picker prefix matches (category-picker-, movie-category-picker-, ...). */
+[id$="-show-selected"]:not([aria-pressed="true"]) .cat-show-selected-tick {
     display: none;
 }
-#category-show-selected[aria-pressed="true"] .cat-show-selected-box {
+[id$="-show-selected"][aria-pressed="true"] .cat-show-selected-box {
     background: var(--color-accent);
     border-color: var(--color-accent);
     color: var(--color-bg);
@@ -1584,8 +1641,8 @@ dialog[open]::backdrop {
     line-height: 0.92;
     margin-left: -0.05em;
     color: var(--color-fg);
-    /* Dramatic clamp - jumps from ~2.75rem on phones to ~6.75rem on TV. */
-    font-size: clamp(2.75rem, 4vw + 1.75rem, 6.75rem);
+    /* Dramatic clamp - jumps from ~1.7rem on phones to ~4.1rem on TV. */
+    font-size: clamp(1.6875rem, 2.4375vw + 1.03125rem, 4.125rem);
     animation: route-hero-rise 560ms cubic-bezier(0.16, 1, 0.3, 1) 100ms both;
 }
 /* Accent the first glyph of every route title in fuchsia. */
@@ -1751,6 +1808,122 @@ dialog[open]::backdrop {
     .settings-stack > .settings-group {
         animation: none;
     }
+}
+
+/* ──────────────────────────────── */
+/* Settings page "instrument panel" */
+/* ──────────────────────────────── */
+@layer components {
+    [data-pill-group] {
+        position: relative;
+        isolation: isolate;
+    }
+    [data-pill-group="ready"] > .btn,
+    [data-pill-group="ready"] > button {
+        position: relative;
+        z-index: 1;
+    }
+
+    .settings-nav {
+        position: relative;
+        isolation: isolate;
+    }
+    .settings-nav[data-rail-ready] .settings-nav-link {
+        position: relative;
+        z-index: 1;
+    }
+}
+
+.overdrive-pill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 0.75rem;
+    background: var(--color-accent-soft);
+    border: 1px solid color-mix(in oklch, var(--color-accent) 55%, transparent);
+    box-shadow:
+        0 6px 18px -10px color-mix(in oklch, var(--color-accent) 50%, transparent),
+        inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 18%, transparent);
+    opacity: 0;
+    will-change: transform, width, height;
+    transition: opacity 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+[data-pill-group="ready"] .btn[aria-pressed="true"] {
+    background: transparent;
+    border-color: transparent;
+    color: var(--color-accent);
+}
+[data-pill-group="ready"] .btn[aria-pressed="true"]:hover,
+[data-pill-group="ready"] .btn[aria-pressed="true"]:focus-visible {
+    background: transparent;
+    border-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+    .overdrive-pill {
+        transition: none;
+    }
+}
+[data-perf-mode="on"] .overdrive-pill {
+    transition: none;
+}
+
+.settings-nav-rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 0.5rem;
+    background: var(--color-accent-soft);
+    opacity: 0;
+    will-change: transform, width, height;
+    transition: opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
+                background-color 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.settings-nav-rail[data-danger="true"] {
+    background: color-mix(in oklch, var(--color-bad) 12%, transparent);
+}
+.settings-nav[data-rail-ready] .settings-nav-link[aria-current="true"] {
+    background: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+    .settings-nav-rail {
+        transition: none;
+    }
+}
+[data-perf-mode="on"] .settings-nav-rail {
+    transition: none;
+}
+
+@keyframes settings-commit-pulse {
+    0% {
+        box-shadow:
+            0 0 0 0 color-mix(in oklch, var(--color-accent) 0%, transparent),
+            0 0 0 0 color-mix(in oklch, var(--color-accent) 0%, transparent);
+    }
+    22% {
+        box-shadow:
+            0 0 0 2px color-mix(in oklch, var(--color-accent) 60%, transparent),
+            0 0 28px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
+    }
+    100% {
+        box-shadow:
+            0 0 0 0 transparent,
+            0 0 0 0 transparent;
+    }
+}
+.settings-commit-pulse {
+    animation: settings-commit-pulse 720ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .settings-commit-pulse {
+        animation: none;
+    }
+}
+[data-perf-mode="on"] .settings-commit-pulse {
+    animation: none;
 }
 
 .movie-card {
@@ -2244,3 +2417,4 @@ html[data-perf-mode="on"] [data-modal-ambient] {
 html[data-platform="android"] [data-modal-ambient] {
     display: none !important;
 }
+
