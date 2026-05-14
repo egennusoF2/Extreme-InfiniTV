@@ -39,7 +39,7 @@ float vnoise(vec2 p) {
 float fbm(vec2 p) {
   float v = 0.0;
   float amp = 0.5;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 3; i++) {
     v += amp * vnoise(p);
     p *= 2.02;
     amp *= 0.5;
@@ -49,19 +49,48 @@ float fbm(vec2 p) {
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
-
-  // Slowly drifting volumetric noise. Domain-warp the second octave so the
-  // pattern feels organic rather than tiled.
-  float t = u_time * 0.025;
-  vec2 q = vec2(fbm(uv * 1.4 + t), fbm(uv * 1.4 + t + 5.1));
-  float n = fbm(uv * 1.8 + q * 0.55);
-
-  // Radial bloom from center, modulated by the noise field so it breathes
-  // organically instead of pulsing on a fixed timer.
   float dist = length(uv);
-  float bloom = exp(-dist * 2.2) * (0.50 + 0.50 * smoothstep(0.0, 1.0, n));
+  vec2 dir = dist > 0.001 ? uv / dist : vec2(0.0, 1.0);
 
-  vec3 color = mix(u_bg, u_accent, bloom * 0.42);
+  float t = u_time * 0.05;
+
+  // Continuous radial twist: a baseline rotation plus distance-scaled shear,
+  // so inner samples rotate slowly while outer ones drift further per unit
+  // time. The fog reads as faintly spiralling around the centre.
+  float twistAngle = t * 0.35 + 0.55 * dist;
+  float ca = cos(twistAngle);
+  float sa = sin(twistAngle);
+  vec2 ruv = mat2(ca, -sa, sa, ca) * uv;
+
+  // Radial outflow: subtract a vector pointing outward, scaled by time, so
+  // fbm features appear to emanate from the centre and drift outward.
+  vec2 flow = ruv - dir * t * 0.55;
+
+  // Double domain-warp: q displaces a second-pass sample, n is the final
+  // turbulent field. Two warp components on independent time axes give the
+  // field its mysterious, living quality without obvious tiling.
+  vec2 q = vec2(
+    fbm(flow * 1.3 + vec2(0.0, t)),
+    fbm(flow * 1.3 + vec2(7.3, -t * 0.7))
+  );
+  float n = fbm(flow * 1.9 + q * 0.85);
+
+  // Dense fog core - bright at centre, falling off rapidly. Modulated by the
+  // noise field so it breathes organically.
+  float bloom = exp(-dist * 1.7) * (0.35 + 0.65 * n);
+
+  // Mid-distance wisps confined to an annular band so the corners stay dark.
+  float annulus = exp(-pow(dist - 0.55, 2.0) * 6.0);
+  float wisps = n * annulus * 0.55;
+
+  float fog = bloom * 0.55 + wisps;
+
+  // Vignette: crush the periphery so the fog feels enclosed and mysterious
+  // rather than fading into nothing at the edges.
+  float vignette = smoothstep(1.45, 0.25, dist);
+
+  vec3 color = mix(u_bg, u_accent, fog * 0.62);
+  color = mix(u_bg * 0.72, color, vignette);
 
   // Very faint film grain to break up flat regions; magnitude kept tiny so
   // it reads as texture, not noise.
@@ -101,16 +130,21 @@ export function setupSplashBackdrop(splash: HTMLElement): () => void {
     return () => {}
   }
 
-  // Cap DPR to keep low-end TV boxes from rendering 4K fragments. The shader
-  // is smooth enough that 1.5x looks identical to 2x at normal viewing.
-  const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+  // Render to a fixed low-resolution buffer that CSS stretches to fill the
+  // viewport. The fog is so soft that 512px on the long edge looks identical
+  // to native res, while costing a fraction of the fragments. This is the
+  // single biggest perf lever - on a 1080p screen it's ~10x fewer pixels than
+  // even 1x DPR rendering.
+  const TARGET_LONG_EDGE = 512
   let pixelW = 0
   let pixelH = 0
   const resize = () => {
     const cssW = canvas.clientWidth || splash.clientWidth || window.innerWidth
     const cssH = canvas.clientHeight || splash.clientHeight || window.innerHeight
-    pixelW = Math.max(1, Math.round(cssW * dpr))
-    pixelH = Math.max(1, Math.round(cssH * dpr))
+    const longEdge = Math.max(cssW, cssH)
+    const scale = TARGET_LONG_EDGE / Math.max(1, longEdge)
+    pixelW = Math.max(1, Math.round(cssW * scale))
+    pixelH = Math.max(1, Math.round(cssH * scale))
     canvas.width = pixelW
     canvas.height = pixelH
     gl.viewport(0, 0, pixelW, pixelH)
