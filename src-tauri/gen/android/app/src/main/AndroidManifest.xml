@@ -6,6 +6,34 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
+    <queries>
+        <!-- Direct-launch targets we probe by name -->
+        <package android:name="org.videolan.vlc" />
+        <package android:name="com.mxtech.videoplayer.pro" />
+        <package android:name="com.mxtech.videoplayer.ad" />
+        <!-- Any app that handles video URIs (chooser population) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+            <data android:mimeType="video/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+            <data android:mimeType="video/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+            <data android:mimeType="application/vnd.apple.mpegurl" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+            <data android:mimeType="application/vnd.apple.mpegurl" />
+        </intent>
+    </queries>
+
     <!-- Features -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

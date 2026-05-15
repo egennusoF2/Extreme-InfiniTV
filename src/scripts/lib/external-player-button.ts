@@ -1,11 +1,14 @@
-// Shared escape-hatch button: "Open in MPV/VLC" while keeping Video.js
-// (or HTML5) as the default backend. The button hides itself when the
-// current backend is already external, when no external player is
-// configured, or on web/Android where external launch is impossible.
+// Shared escape-hatch button covering both platform handoff paths:
+//   Desktop:  "Open in MPV/VLC" - spawns the configured external player
+//             via launch_external_player Tauri command. Hidden when no
+//             path is configured or when the backend is already external.
+//   Android:  "Open in player…" - fires Intent.ACTION_VIEW via the
+//             AndroidIntent bridge, wrapped in createChooser() so the
+//             user picks every time
 //
-// Each call site supplies a getter for the current source URL (and
-// optional headers) plus a "before launch" hook so embedded playback can
-// be paused before the external window grabs focus.
+// The button stays hidden on web (no Tauri bridge available). Each call
+// site supplies a getter for the current source URL plus optional
+// headers / title / "before launch" hooks.
 
 import { log } from "@/scripts/lib/log.js"
 import {
@@ -17,19 +20,30 @@ import {
 import {
   getExternalLauncher,
   externalPlayersAvailable,
+  androidExternalAvailable,
+  getAndroidHandoffLauncher,
+  listAndroidVideoPlayerApps,
+  openStreamInAndroidPackage,
+  androidMimeForUrl,
+  AndroidHandoffError,
   PlayerLaunchError,
   PlayerNotConfiguredError,
+  type AndroidHandoffKind,
   type ExternalPlayerKind,
   type ExternalLaunchOptions,
 } from "@/scripts/lib/player-runtime.ts"
+import { openAndroidPlayerPicker } from "@/scripts/lib/player-picker-dialog.ts"
 import { toast, toastError } from "@/scripts/lib/toast.js"
 import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
+
+type ButtonKind = ExternalPlayerKind | AndroidHandoffKind
 
 export interface EscapeHatchHooks {
   getSrc(): string | null | undefined
   getHeaders?(): { userAgent?: string | null; referer?: string | null } | null | undefined
   getResumeSeconds?(): number
-  beforeLaunch?(kind: ExternalPlayerKind): void
+  getTitle?(): string | null | undefined
+  beforeLaunch?(kind: ButtonKind): void
 }
 
 function pickPreferredExternal(): ExternalPlayerKind | null {
@@ -39,10 +53,24 @@ function pickPreferredExternal(): ExternalPlayerKind | null {
   return null
 }
 
-function labelFor(kind: ExternalPlayerKind): string {
-  const localized = t("settings.playback.openIn", { player: kind.toUpperCase() })
+function pickPreferredAndroidHandoff(): AndroidHandoffKind {
+  return "system"
+}
+
+function labelFor(kind: ButtonKind): string {
+  if (kind === "system") {
+    const localized = t("settings.playback.openInSystem")
+    if (localized && localized !== "settings.playback.openInSystem") return localized
+    return "Open in player…"
+  }
+  const playerName = kind === "vlc" ? "VLC" : kind.toUpperCase()
+  const localized = t("settings.playback.openIn", { player: playerName })
   if (localized && localized !== "settings.playback.openIn") return localized
-  return `Open in ${kind.toUpperCase()}`
+  return `Open in ${playerName}`
+}
+
+function isAndroidKind(kind: ButtonKind): kind is AndroidHandoffKind {
+  return kind === "system" || (kind === "vlc" && androidExternalAvailable)
 }
 
 export interface ExternalPlayerButtonHandle {
@@ -63,6 +91,18 @@ export function setupExternalPlayerButton(
   const labelEl = btn.querySelector<HTMLElement>("[data-label]") || btn
 
   const refresh = () => {
+    if (!hooks.getSrc()) {
+      btn.hidden = true
+      return
+    }
+    if (androidExternalAvailable) {
+      const kind = pickPreferredAndroidHandoff()
+      btn.hidden = false
+      btn.dataset.kind = kind
+      btn.dataset.platform = "android"
+      labelEl.textContent = labelFor(kind)
+      return
+    }
     if (!externalPlayersAvailable) {
       btn.hidden = true
       return
@@ -77,30 +117,86 @@ export function setupExternalPlayerButton(
       btn.hidden = true
       return
     }
-    if (!hooks.getSrc()) {
-      btn.hidden = true
-      return
-    }
     btn.hidden = false
     btn.dataset.kind = preferred
+    btn.dataset.platform = "desktop"
     labelEl.textContent = labelFor(preferred)
   }
 
   const onClick = async () => {
-    const kind = (btn.dataset.kind as ExternalPlayerKind) || pickPreferredExternal()
-    if (!kind) return
     const src = hooks.getSrc()
     if (!src) {
       toastError(t("settings.playback.noSource") || "Nothing to play yet.")
       return
     }
+    const isAndroid = btn.dataset.platform === "android"
+    const kind = (btn.dataset.kind as ButtonKind) ||
+      (isAndroid ? pickPreferredAndroidHandoff() : pickPreferredExternal())
+    if (!kind) return
     try {
       hooks.beforeLaunch?.(kind)
     } catch (err) {
       log.warn("[xt:external-btn] beforeLaunch threw:", err)
     }
-    const launcher = getExternalLauncher(kind)
     const headers = hooks.getHeaders?.() || null
+    const title = hooks.getTitle?.() || null
+    if (isAndroid && isAndroidKind(kind)) {
+      if (kind === "vlc") {
+        const launcher = getAndroidHandoffLauncher("vlc")
+        toast({
+          title: t("settings.playback.launching", { player: "VLC" }) || "Launching VLC…",
+          duration: 2000,
+        })
+        try {
+          await launcher.launch(src, {
+            userAgent: headers?.userAgent ?? null,
+            referer: headers?.referer ?? null,
+            title,
+          })
+        } catch (err) {
+          surfaceAndroidHandoffError(err, kind)
+        }
+        return
+      }
+      // "system" path: enumerate handlers, show our own picker, launch
+      // via setPackage(). See player-picker-dialog.ts for the rationale -
+      // chooser-routed intents fail on VLC because Android picks the wrong
+      // VLC activity for the resolved intent.
+      const mime = androidMimeForUrl(src)
+      const apps = listAndroidVideoPlayerApps(src, mime)
+      if (apps.length === 0) {
+        toastError(
+          t("settings.playback.androidNoHandler") ||
+            "No app on this device can play this stream. Install VLC or MX Player.",
+        )
+        return
+      }
+      const choice = await openAndroidPlayerPicker({
+        apps,
+        contentTitle: title,
+      })
+      if (!choice) return
+      toast({
+        title:
+          t("settings.playback.launching", { player: choice.label || choice.pkg }) ||
+          `Launching ${choice.label || choice.pkg}…`,
+        duration: 2000,
+      })
+      try {
+        await openStreamInAndroidPackage(choice.pkg, src, {
+          activity: choice.activity || null,
+          userAgent: headers?.userAgent ?? null,
+          referer: headers?.referer ?? null,
+          title,
+          mime,
+        })
+      } catch (err) {
+        surfaceAndroidHandoffError(err, "system")
+      }
+      return
+    }
+    const desktopKind = kind as ExternalPlayerKind
+    const launcher = getExternalLauncher(desktopKind)
     const opts: ExternalLaunchOptions = {
       userAgent: headers?.userAgent ?? null,
       referer: headers?.referer ?? null,
@@ -108,14 +204,14 @@ export function setupExternalPlayerButton(
     }
     toast({
       title:
-        t("settings.playback.launching", { player: kind.toUpperCase() }) ||
-        `Launching ${kind.toUpperCase()}…`,
+        t("settings.playback.launching", { player: desktopKind.toUpperCase() }) ||
+        `Launching ${desktopKind.toUpperCase()}…`,
       duration: 2000,
     })
     try {
       await launcher.launch(src, opts)
     } catch (err) {
-      surfaceLaunchError(err, kind)
+      surfaceLaunchError(err, desktopKind)
     }
   }
 
@@ -135,6 +231,35 @@ export function setupExternalPlayerButton(
       document.removeEventListener(LOCALE_EVENT, refresh)
     },
   }
+}
+
+export function surfaceAndroidHandoffError(err: unknown, kind: AndroidHandoffKind): void {
+  if (err instanceof AndroidHandoffError) {
+    if (err.code === "NO_HANDLER") {
+      toastError(
+        t("settings.playback.androidNoHandler") ||
+          "No app on this device can play this stream. Install VLC or MX Player.",
+      )
+      return
+    }
+    if (err.code === "VLC_MISSING") {
+      toastError(
+        t("settings.playback.androidVlcMissing") ||
+          "VLC for Android isn't installed.",
+      )
+      return
+    }
+    if (err.code === "NO_BRIDGE") {
+      toastError(
+        t("settings.playback.androidNoBridge") ||
+          "External playback isn't available on this device.",
+      )
+      return
+    }
+  }
+  log.error("[xt:external-btn] android handoff threw:", err)
+  const playerName = kind === "vlc" ? "VLC" : "external player"
+  toastError(`Couldn't open in ${playerName}.`)
 }
 
 export function surfaceLaunchError(err: unknown, kind: ExternalPlayerKind): void {

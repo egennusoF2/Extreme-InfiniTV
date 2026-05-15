@@ -484,8 +484,10 @@ const externalBtnHandle = setupExternalPlayerButton(
       if (!saved || saved.completed) return 0
       return saved.position > RESUME_MIN_SECONDS ? saved.position : 0
     },
+    getTitle() {
+      return movie?.name || null
+    },
     beforeLaunch() {
-      // Pause Video.js (or HTML5) so we don't double up on audio.
       try { vjs?.pause?.() } catch {}
     },
   }

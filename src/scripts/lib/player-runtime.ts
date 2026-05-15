@@ -93,6 +93,12 @@ const isAndroid = (() => {
 
 export const externalPlayersAvailable = isTauri && !isAndroid
 
+export const androidExternalAvailable =
+  isTauri &&
+  isAndroid &&
+  typeof window !== "undefined" &&
+  !!(window as any).AndroidIntent
+
 let invokePromise: Promise<((cmd: string, args: unknown) => Promise<unknown>) | null> | null = null
 async function getInvoke() {
   if (!externalPlayersAvailable) return null
@@ -236,6 +242,252 @@ export function getExternalLauncher(kind: ExternalPlayerKind): ExternalLauncher 
         throw classifyError(raw, kind, path)
       }
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Android external handoff (parallel API to getExternalLauncher)
+// ---------------------------------------------------------------------------
+// The Android path doesn't spawn processes - it fires an Intent.ACTION_VIEW
+// through the AndroidIntent bridge in MainActivity.kt. Two kinds:
+//   "system"  - createChooser() so the user picks (Android remembers their
+//               choice once they hit "Always").
+//   "vlc"     - direct package-pinned launch to org.videolan.vlc. The UI
+//               should only offer this when isVlcInstalled() returns true.
+
+export type AndroidHandoffKind = "system" | "vlc"
+
+interface AndroidIntentBridge {
+  isVlcInstalled?: () => boolean
+  isMxPlayerInstalled?: () => boolean
+  viewStream?: (
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+  openInVlc?: (
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+  listVideoPlayerApps?: (url: string, mime: string) => string
+  openInPackage?: (
+    pkg: string,
+    activity: string,
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+}
+
+export interface AndroidVideoApp {
+  pkg: string
+  label: string
+  activity: string
+  icon: string
+}
+
+function androidIntent(): AndroidIntentBridge | null {
+  if (typeof window === "undefined") return null
+  const bridge = (window as any).AndroidIntent as AndroidIntentBridge | undefined
+  return bridge || null
+}
+
+export function isVlcInstalledOnAndroid(): boolean {
+  try {
+    return !!androidIntent()?.isVlcInstalled?.()
+  } catch (err) {
+    log.warn("[xt:player] AndroidIntent.isVlcInstalled threw:", err)
+    return false
+  }
+}
+
+export function isMxPlayerInstalledOnAndroid(): boolean {
+  try {
+    return !!androidIntent()?.isMxPlayerInstalled?.()
+  } catch (err) {
+    log.warn("[xt:player] AndroidIntent.isMxPlayerInstalled threw:", err)
+    return false
+  }
+}
+
+// Pick a sensible MIME hint for the Android Intent.
+export function androidMimeForUrl(url: string | null | undefined): string {
+  if (!url) return "video/*"
+  const path = (url.split("?")[0] ?? "").toLowerCase()
+  if (path.endsWith(".m3u8")) return "application/vnd.apple.mpegurl"
+  if (path.endsWith(".ts")) return "video/mp2t"
+  if (path.endsWith(".mp4") || path.endsWith(".m4v")) return "video/mp4"
+  if (path.endsWith(".mkv")) return "video/x-matroska"
+  if (path.endsWith(".webm")) return "video/webm"
+  if (path.endsWith(".mov")) return "video/quicktime"
+  if (path.endsWith(".avi")) return "video/x-msvideo"
+  if (path.endsWith(".mpd")) return "application/dash+xml"
+  if (/\/live\/[^/]+\/[^/]+\/\d+$/i.test(path)) {
+    return "application/vnd.apple.mpegurl"
+  }
+  return "video/*"
+}
+
+export class AndroidHandoffError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "NO_BRIDGE" | "NO_HANDLER" | "VLC_MISSING" | "OTHER",
+    public readonly kind: AndroidHandoffKind,
+  ) {
+    super(message)
+    this.name = "AndroidHandoffError"
+  }
+}
+
+export interface AndroidHandoffOptions {
+  userAgent?: string | null
+  referer?: string | null
+  title?: string | null
+  mime?: string | null
+}
+
+export interface AndroidHandoffLauncher {
+  kind: AndroidHandoffKind
+  available(): boolean
+  launch(src: string, options?: AndroidHandoffOptions): Promise<void>
+}
+
+export function getAndroidHandoffLauncher(kind: AndroidHandoffKind): AndroidHandoffLauncher {
+  return {
+    kind,
+    available() {
+      if (!androidExternalAvailable) return false
+      if (kind === "vlc") return isVlcInstalledOnAndroid()
+      return true
+    },
+    async launch(src, options = {}) {
+      const bridge = androidIntent()
+      if (!bridge) {
+        throw new AndroidHandoffError(
+          "AndroidIntent bridge not available",
+          "NO_BRIDGE",
+          kind,
+        )
+      }
+      const mime = options.mime || androidMimeForUrl(src)
+      const userAgent = options.userAgent || getUserAgent() || ""
+      const referer = options.referer || ""
+      const title = options.title || ""
+      try {
+        let ok = false
+        if (kind === "vlc") {
+          if (!bridge.isVlcInstalled?.()) {
+            throw new AndroidHandoffError(
+              "VLC for Android is not installed",
+              "VLC_MISSING",
+              kind,
+            )
+          }
+          ok = !!bridge.openInVlc?.(src, mime, userAgent, referer, title)
+        } else {
+          ok = !!bridge.viewStream?.(src, mime, userAgent, referer, title)
+        }
+        if (!ok) {
+          throw new AndroidHandoffError(
+            kind === "vlc"
+              ? "VLC refused to open the stream"
+              : "No app on this device can handle this stream",
+            kind === "vlc" ? "OTHER" : "NO_HANDLER",
+            kind,
+          )
+        }
+      } catch (err) {
+        if (err instanceof AndroidHandoffError) throw err
+        log.warn("[xt:player] AndroidIntent threw:", err)
+        throw new AndroidHandoffError(String(err), "OTHER", kind)
+      }
+    },
+  }
+}
+
+// Pre-resolve the chooser candidates so the UI can present its own picker.
+// Used to dodge a long-standing VLC-on-Android quirk where chooser-routed
+// intents resolve to the wrong activity inside VLC (its playback service
+// starts but the player activity never foregrounds). Pairs with
+// openStreamInAndroidPackage(), which launches via setPackage() - the same
+// reliable path the dedicated VLC button uses.
+export function listAndroidVideoPlayerApps(
+  url: string,
+  mime?: string | null,
+): AndroidVideoApp[] {
+  const bridge = androidIntent()
+  if (!bridge?.listVideoPlayerApps) return []
+  const resolvedMime = mime || androidMimeForUrl(url)
+  try {
+    const json = bridge.listVideoPlayerApps(url, resolvedMime)
+    if (!json) return []
+    const parsed = JSON.parse(json)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((entry) => ({
+        pkg: typeof entry?.pkg === "string" ? entry.pkg : "",
+        label: typeof entry?.label === "string" ? entry.label : "",
+        activity: typeof entry?.activity === "string" ? entry.activity : "",
+        icon: typeof entry?.icon === "string" ? entry.icon : "",
+      }))
+      .filter((entry) => entry.pkg.length > 0)
+  } catch (err) {
+    log.warn("[xt:player] listVideoPlayerApps parse failed:", err)
+    return []
+  }
+}
+
+export interface AndroidPackageLaunchOptions extends AndroidHandoffOptions {
+  /** Optional explicit activity component (from listAndroidVideoPlayerApps). */
+  activity?: string | null
+}
+
+export async function openStreamInAndroidPackage(
+  pkg: string,
+  src: string,
+  options: AndroidPackageLaunchOptions = {},
+): Promise<void> {
+  const bridge = androidIntent()
+  if (!bridge?.openInPackage) {
+    throw new AndroidHandoffError(
+      "AndroidIntent bridge not available",
+      "NO_BRIDGE",
+      "system",
+    )
+  }
+  const mime = options.mime || androidMimeForUrl(src)
+  const userAgent = options.userAgent || getUserAgent() || ""
+  const referer = options.referer || ""
+  const title = options.title || ""
+  const activity = options.activity || ""
+  let ok = false
+  try {
+    ok = !!bridge.openInPackage(
+      pkg,
+      activity,
+      src,
+      mime,
+      userAgent,
+      referer,
+      title,
+    )
+  } catch (err) {
+    log.warn("[xt:player] AndroidIntent.openInPackage threw:", err)
+    throw new AndroidHandoffError(String(err), "OTHER", "system")
+  }
+  if (!ok) {
+    throw new AndroidHandoffError(
+      `Couldn't launch ${pkg}`,
+      "OTHER",
+      "system",
+    )
   }
 }
 

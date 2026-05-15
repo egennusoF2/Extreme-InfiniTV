@@ -52,7 +52,14 @@ pub fn run() {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(discord::RpcState::default())
         .manage(external_player::ExternalPlayerState::default())
@@ -91,6 +98,10 @@ pub fn run() {
                     if let Err(error) = main_window.set_shadow(true) {
                         log::warn!("[window] set_shadow(true) failed: {error}");
                     }
+                    if let Err(error) = main_window.show() {
+                        log::warn!("[window] show() failed: {error}");
+                    }
+                    let _ = main_window.set_focus();
                 }
             }
             Ok(())

@@ -392,6 +392,11 @@ dialog[open]::backdrop {
         @apply opacity-50 cursor-not-allowed;
     }
 
+    .xt-picker-row {
+        transition: color 150ms, background-color 150ms, border-color 150ms,
+                    transform 100ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
     .field-input {
         @apply h-11 w-full rounded-xl border border-line bg-surface px-3 text-base text-fg placeholder:text-fg-3 outline-none;
         transition: border-color 150ms, background-color 150ms, box-shadow 150ms;

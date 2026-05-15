@@ -30,6 +30,11 @@
   <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-64748b?color=a855f7" alt="Supported platforms: Windows, macOS, Linux, Android"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/infinitel8p/Extreme-InfiniTV/issues"><img src="https://img.shields.io/github/issues/infinitel8p/Extreme-InfiniTV?logo=github&color=a855f7" alt="Issues"/></a>
+  <a href="https://github.com/infinitel8p/Extreme-InfiniTV/discussions"><img src="https://img.shields.io/github/discussions/infinitel8p/Extreme-InfiniTV?logo=github&color=a855f7" alt="Discussions"/></a>
+</p>
+
 ## Screenshots
 
 <p align="center">

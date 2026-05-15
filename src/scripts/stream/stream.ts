@@ -36,6 +36,7 @@ import { toast, toastError } from "@/scripts/lib/toast.js"
 import {
   mountPlayer,
   externalPlayersAvailable,
+  androidExternalAvailable,
   getExternalLauncher,
 } from "@/scripts/lib/player-runtime.ts"
 import {
@@ -1756,7 +1757,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
   liveExternalBtnHandle?.dispose()
   liveExternalBtnHandle = null
 
-  if (!parent || !externalPlayersAvailable) return
+  if (!parent || (!externalPlayersAvailable && !androidExternalAvailable)) return
 
   const btn = document.createElement("button")
   btn.id = "external-launch-btn"
@@ -1785,6 +1786,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
         referer: channelHeaders?.referer || null,
       }
     },
+    getTitle: () => name || null,
     beforeLaunch: () => {
       try { vjs?.pause?.() } catch {}
     },
