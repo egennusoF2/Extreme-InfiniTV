@@ -4,6 +4,7 @@ import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   loadCreds,
   getActiveEntry,
+  getEntries,
   fmtBase,
   safeHttpUrl,
   isLikelyM3USource,
@@ -160,8 +161,30 @@ let activePlaylistId = ""
 let activePlaylistTitle = ""
 let activeTuningTransition: any = null
 
+// The inline script in livetv.astro sets data-first-run optimistically from
+// localStorage["xt_playlists"]. On Tauri builds the real entry list lives in
+// the plugin-store (.xtream.creds.json), so localStorage is empty and the
+// welcome card stays up over the actual channels. Reconcile against the
+// authoritative source whenever the page boots or the entry list changes.
+async function reconcileFirstRun() {
+  try {
+    const entries = await getEntries()
+    document.documentElement.toggleAttribute(
+      "data-first-run",
+      entries.length === 0
+    )
+  } catch (err) {
+    log.warn("[xt:livetv] reconcileFirstRun failed:", err)
+  }
+}
+
+document.addEventListener("xt:entries-updated", () => {
+  reconcileFirstRun()
+})
+
 document.addEventListener("xt:active-changed", () => {
   clearRichPresence().catch(() => {})
+  reconcileFirstRun()
   loadChannels()
 })
 
@@ -185,6 +208,7 @@ document.addEventListener("xt:channel-epg-changed", (e) => {
   ) {
     paintSidePanelFromXmltv(currentlyPlayingId)
   }
+  if (radioModeChannelId != null) paintRadioNowPlaying(radioModeChannelId)
 })
 
 document.addEventListener(EPG_LOADED_EVENT, (e) => {
@@ -196,6 +220,7 @@ document.addEventListener(EPG_LOADED_EVENT, (e) => {
   if (currentlyPlayingId && hasDirectUrl(currentlyPlayingId)) {
     paintSidePanelFromXmltv(currentlyPlayingId)
   }
+  if (radioModeChannelId != null) paintRadioNowPlaying(radioModeChannelId)
 })
 
 document.addEventListener(EPG_OFFSET_EVENT, (e) => {
@@ -1283,6 +1308,7 @@ const ensureEmbeddedPlayer = async (backend) => {
   if (mounted.backend === "videojs") {
     attachPlayerFocusKeeper(vjs)
   }
+  attachAudioOnlyDetection(vjs)
 
   vjs.on("playing", () => {
     hideTuningOverlay()
@@ -1334,6 +1360,98 @@ const ensureEmbeddedPlayer = async (backend) => {
   })
 
   return vjs
+}
+
+/** Channel ID currently rendered in radio mode (-1 = none). */
+let radioModeChannelId: number | null = null
+
+function getPlayerWrap(): HTMLElement | null {
+  return document.getElementById("player-wrap")
+}
+
+function setRadioMode(channel: { id: number; name?: string; logo?: string | null }) {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  wrap.dataset.radioMode = "on"
+  const nameEl = wrap.querySelector<HTMLElement>("[data-radio-name]")
+  if (nameEl) nameEl.textContent = channel.name || `Channel ${channel.id}`
+  const cover = wrap.querySelector<HTMLImageElement>("[data-radio-cover]")
+  if (cover) {
+    cover.dataset.loaded = "false"
+    const logoUrl = channel.logo ? safeHttpUrl(channel.logo) : null
+    if (logoUrl) {
+      cover.onload = () => { cover.dataset.loaded = "true" }
+      cover.onerror = () => { cover.dataset.loaded = "false" }
+      cover.src = logoUrl
+    } else {
+      cover.removeAttribute("src")
+    }
+  }
+  radioModeChannelId = channel.id
+  paintRadioNowPlaying(channel.id)
+  wrap.setAttribute("aria-label", t("livetv.radioAriaLabel", { name: channel.name || "" }) || `Radio: ${channel.name || ""}`)
+}
+
+function clearRadioMode() {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  delete wrap.dataset.radioMode
+  wrap.removeAttribute("aria-label")
+  const nowEl = wrap.querySelector<HTMLElement>("[data-radio-nowplaying]")
+  if (nowEl) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+  }
+  radioModeChannelId = null
+}
+
+function paintRadioNowPlaying(channelId: number) {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  const nowEl = wrap.querySelector<HTMLElement>("[data-radio-nowplaying]")
+  if (!nowEl) return
+  const channel = all.find((entry) => entry.id === channelId)
+  if (!channel || !activePlaylistId) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  const tvgId = effectiveTvgId(channel, activePlaylistId)
+  if (!tvgId) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  const state = getProgrammesSync(activePlaylistId)
+  const { current } = getNowNext(state?.programmes, tvgId)
+  if (!current?.title) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  nowEl.textContent = current.title
+  nowEl.hidden = false
+}
+
+/** Listen for the underlying <video> exposing zero video pixels - that's an
+ * audio-only stream, so promote the wrap to radio mode even when the M3U
+ * didn't carry a `tvg-type` hint. Hook this once after the player mounts. */
+function attachAudioOnlyDetection(handle: { on(event: string, fn: (...args: unknown[]) => void): void }) {
+  const detect = () => {
+    const ctx = lastPlayContext
+    if (!ctx) return
+    const wrap = getPlayerWrap()
+    if (!wrap) return
+    if (wrap.dataset.radioMode === "on") return
+    const videoEl = wrap.querySelector("video") as HTMLVideoElement | null
+    if (!videoEl) return
+    if (videoEl.videoWidth === 0 && videoEl.videoHeight === 0) {
+      const channel = all.find((entry) => entry.id === ctx.streamId)
+      if (channel) setRadioMode(channel)
+    }
+  }
+  handle.on("loadedmetadata", detect)
+  handle.on("playing", detect)
 }
 
 function showTuningOverlay(logoUrl) {
@@ -1604,6 +1722,11 @@ async function play(streamId, name) {
 
   resetEmptyState()
   document.getElementById("player")?.removeAttribute("hidden")
+  if (channel?.isRadio) {
+    setRadioMode({ id: streamId, name, logo: channel.logo ?? null })
+  } else {
+    clearRadioMode()
+  }
   const player = await ensureEmbeddedPlayer(backend)
   if (!player) return
   await applyStreamHeaders(channelHeaders)
@@ -1669,6 +1792,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
 }
 
 function showExternalPlayerEmptyState(backend, channelName) {
+  clearRadioMode()
   const empty = document.getElementById("player-empty")
   if (!empty) return
   const eyebrow = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
@@ -1927,6 +2051,7 @@ if (listStatus && /no playlist selected/i.test(listStatus.textContent || "")) {
 ;(async () => {
   log.log("[xt:livetv] boot start")
   await initI18n()
+  await reconcileFirstRun()
   creds = await loadCreds()
   log.log("[xt:livetv] boot creds host=", !!creds.host)
   if (creds.host) {

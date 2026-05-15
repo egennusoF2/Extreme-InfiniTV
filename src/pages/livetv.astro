@@ -138,8 +138,8 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 				<div
 					class="rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
 					<div
-						class="aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line flex items-center justify-center shrink-0 relative"
-						style="max-height: 60dvh; max-width: calc(60dvh * 16 / 9);">
+						id="player-wrap"
+						class="player-wrap aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line flex items-center justify-center shrink-0 relative">
 						<div
 							id="player-empty"
 							class="absolute inset-0 flex flex-col items-center justify-center gap-6 text-center px-6 pointer-events-none">
@@ -169,6 +169,37 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 							controls
 							hidden
 							playsinline></video>
+						<div
+							id="radio-display"
+							class="radio-display max-[480px]:flex-col max-[480px]:text-center max-[480px]:items-center"
+							aria-hidden="true">
+							<div
+								class="radio-display__art relative shrink-0 aspect-square rounded-2xl bg-surface-2 overflow-hidden"
+								data-radio-art>
+								<div class="radio-display__art-fallback absolute inset-0 grid place-items-center" aria-hidden="true">
+									<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M14 4l-9 1.5v12"/><path d="M16 18a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z"/><path d="M9 17a2 2 0 1 0 -4 0a2 2 0 0 0 4 0z"/><path d="M14 17v-12"/></svg>
+								</div>
+								<img
+									alt=""
+									decoding="async"
+									referrerpolicy="no-referrer"
+									data-radio-cover
+									class="absolute inset-0 w-full h-full object-contain p-3 opacity-0 data-[loaded=true]:opacity-100 transition-opacity duration-[240ms]" />
+							</div>
+							<div class="radio-display__meta flex flex-col gap-2 min-w-0 flex-1 pb-14 max-[480px]:items-center max-[480px]:pb-16">
+								<span
+									class="radio-display__eyebrow inline-flex items-center gap-2 text-fg-3 text-[0.625rem] font-semibold uppercase tracking-[0.22em]"
+									data-i18n="livetv.radioEyebrow"
+								>On air · Radio</span>
+								<p
+									class="radio-display__name text-fg font-bold tracking-tight leading-tight min-w-0 line-clamp-2 text-[clamp(1.5rem,3vw,2.25rem)]"
+									data-radio-name>-</p>
+								<p
+									class="radio-display__nowplaying text-fg-2 text-sm m-0 min-w-0 line-clamp-2"
+									data-radio-nowplaying
+									hidden></p>
+							</div>
+						</div>
 					</div>
 
 					<div
@@ -204,6 +235,84 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 		html[data-first-run="true"] #livetv-main { display: none; }
 		html[data-first-run="true"] #livetv-welcome { display: flex; }
 		html[data-first-run="true"] #livetv-page-main { min-height: auto; }
+
+		.player-wrap {
+			max-height: 60dvh;
+			max-width: calc(60dvh * 16 / 9);
+		}
+
+		/* Radio mode */
+		.radio-display { display: none; }
+		.player-wrap[data-radio-mode="on"] {
+			aspect-ratio: auto;
+			max-height: none;
+			max-width: 100%;
+			height: auto;
+			min-height: clamp(14rem, 28dvh, 22rem);
+			background:
+				radial-gradient(
+					120% 80% at 50% 0%,
+					color-mix(in oklch, var(--color-accent) 24%, transparent) 0%,
+					transparent 60%
+				),
+				linear-gradient(180deg, var(--color-surface-2), var(--color-surface));
+			padding: clamp(1rem, 3vw, 2rem);
+			gap: clamp(1rem, 3vw, 2rem);
+			justify-content: flex-start;
+		}
+		.player-wrap[data-radio-mode="on"] #player-empty { display: none !important; }
+		.player-wrap[data-radio-mode="on"] .radio-display {
+			display: flex;
+			align-items: center;
+			gap: clamp(1rem, 3vw, 2rem);
+			width: 100%;
+			min-width: 0;
+		}
+		.player-wrap[data-radio-mode="on"] .video-js,
+		.player-wrap[data-radio-mode="on"] #player {
+			position: absolute;
+			inset: auto 0 0 0;
+			width: 100%;
+			height: 3.25rem;
+			padding-top: 0 !important;
+			background: transparent !important;
+		}
+		.player-wrap[data-radio-mode="on"] .video-js .vjs-tech,
+		.player-wrap[data-radio-mode="on"] #player video,
+		.player-wrap[data-radio-mode="on"] .video-js .vjs-poster {
+			display: none;
+		}
+		.player-wrap[data-radio-mode="on"] .video-js .vjs-control-bar {
+			background: color-mix(in oklch, var(--color-bg) 70%, transparent);
+			border-top: 1px solid var(--color-line);
+			border-radius: 0 0 0.75rem 0.75rem;
+		}
+
+		.radio-display__art {
+			width: clamp(7rem, 16vw, 11rem);
+			box-shadow:
+				0 0 0 1px var(--color-line),
+				0 20px 40px -12px color-mix(in oklch, var(--color-accent) 38%, transparent),
+				0 8px 20px -6px rgb(0 0 0 / 0.55);
+		}
+		.radio-display__art-fallback {
+			color: color-mix(in oklch, var(--color-fg-3) 80%, transparent);
+		}
+		.radio-display__eyebrow::before {
+			content: "";
+			width: 0.375rem;
+			height: 0.375rem;
+			border-radius: 999px;
+			background: var(--color-accent);
+			box-shadow: 0 0 0 4px var(--color-accent-soft);
+		}
+
+		@media (max-width: 480px) {
+			.player-wrap[data-radio-mode="on"] {
+				flex-direction: column;
+				padding: 1rem;
+			}
+		}
 	</style>
 
 	<script>

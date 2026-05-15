@@ -90,6 +90,7 @@ function m3uToChannelList(text) {
       tvgId: entry.tvgId || undefined,
       norm: normalize(`${entry.name} ${category} ${entry.tvgId || ""}`),
       url: entry.url,
+      isRadio: !!entry.isRadio,
     })
   }
   return out
