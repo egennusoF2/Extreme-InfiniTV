@@ -285,8 +285,10 @@ export function parseXmlTv(xml) {
   const programmes = new Map()
   /** @type {Map<string, string>} */
   const channelNames = new Map()
-  const sanitized = xml.replace(/<!DOCTYPE[\s\S]*?>/gi, "")
-  const doc = new DOMParser().parseFromString(sanitized, "text/xml")
+  if (/<!DOCTYPE\b/i.test(xml) || /<!ENTITY\b/i.test(xml)) {
+    throw new Error("XMLTV contains forbidden DOCTYPE/ENTITY declaration")
+  }
+  const doc = new DOMParser().parseFromString(xml, "text/xml")
   const err = doc.querySelector("parsererror")
   if (err) throw new Error("XMLTV parse error: " + err.textContent.slice(0, 200))
 
