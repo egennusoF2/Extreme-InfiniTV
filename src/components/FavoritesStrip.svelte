@@ -1,5 +1,6 @@
 <script>
   // Hub "Favorites" strip - cross-kind favorites for the active playlist.
+  // Pass `kind` to filter to a single content kind ("live" / "vod" / "series").
   import { onMount } from "svelte"
   import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -12,6 +13,9 @@
   import { getCached, hydrate as hydrateCache } from "@/scripts/lib/cache.js"
   import { kindLabel, KIND_ICON_SVG } from "@/scripts/lib/kinds.js"
 
+  /** @type {{ kind?: "all" | "live" | "vod" | "series" }} */
+  let { kind: filterKind = "all" } = $props()
+
   /** @type {Array<{ kind: "live"|"vod"|"series", id: number, name: string, logo: string|null, href: string }>} */
   let entries = $state([])
   let activePlaylistId = $state("")
@@ -20,6 +24,13 @@
   // track it and re-evaluate on LOCALE_EVENT.
   const tr = (key, params) => (locale, t(key, params))
   const kl = (kind) => (locale, kindLabel(kind))
+
+  const titleKey = $derived(
+    filterKind === "all" ? "nav.favorites" : `hub.strip.favorites.${filterKind}`,
+  )
+  const viewAllHref = $derived(
+    filterKind === "all" ? "/favorites" : `/favorites?kind=${filterKind}`,
+  )
   /** @type {{ live: Map<number, any>, vod: Map<number, any>, series: Map<number, any> } | null} */
   let lookups = null
   let lookupsForPlaylistId = ""
@@ -96,7 +107,8 @@
       await rebuildLookups(active._id)
     }
     const raw = getGlobalFavorites(active._id)
-    entries = raw.map((e) => buildEntry(active._id, e, lookups || {})).slice(0, 12)
+    const filtered = filterKind === "all" ? raw : raw.filter((row) => row.kind === filterKind)
+    entries = filtered.map((entry) => buildEntry(active._id, entry, lookups || {})).slice(0, 12)
   }
 
   onMount(() => {
@@ -137,14 +149,14 @@
 
 {#if entries.length}
   <section
-    aria-label={tr("nav.favorites")}
+    aria-label={tr(titleKey)}
     class="fav-section flex flex-col gap-3 shrink-0">
     <div class="hub-section-head px-1">
       <div class="hub-section-head__title">
-        <h2 class="hub-section-head__heading">{tr("nav.favorites")}</h2>
+        <h2 class="hub-section-head__heading">{tr(titleKey)}</h2>
       </div>
       <a
-        href="/favorites"
+        href={viewAllHref}
         class="hub-section-head__count text-fg-3 hover:text-accent focus-visible:text-accent transition-colors">
         {tr("strip.viewAll")}
         <svg viewBox="0 0 24 24" width="0.85em" height="0.85em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="ml-0.5 inline-block align-[-1px]">

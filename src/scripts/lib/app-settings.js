@@ -11,12 +11,45 @@ const KEY_PLAYER_ARGS_VLC = "xt_player_args_vlc"
 const KEY_PLAYER_REUSE_MPV = "xt_player_reuse_mpv"
 const KEY_PLAYER_REUSE_VLC = "xt_player_reuse_vlc"
 const KEY_CLOSE_TO_TRAY = "xt_close_to_tray"
+const KEY_HUB_STRIPS = "xt_hub_strips"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
 export const PROGRESS_RETENTION_EVENT = "xt:progress-retention-changed"
 export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
 export const CLOSE_TO_TRAY_EVENT = "xt:close-to-tray-changed"
+export const HUB_STRIPS_EVENT = "xt:hub-strips-changed"
+
+/**
+ * Catalog of every home-page strip the user can add. `kind` is the
+ * content filter the strip applies; `all` means cross-kind. Catalog ids
+ * are unique and stable across versions.
+ *
+ * @typedef {"continue-watching" | "favorites" | "watchlist" | "recently-added"} HubStripType
+ * @typedef {"all" | "live" | "vod" | "series"} HubStripKind
+ * @typedef {{ id: string, type: HubStripType, kind: HubStripKind }} HubStripDefinition
+ */
+/** @type {ReadonlyArray<HubStripDefinition>} */
+export const HUB_STRIP_CATALOG = Object.freeze([
+  { id: "continue-watching",     type: "continue-watching", kind: "all"    },
+  { id: "favorites",             type: "favorites",         kind: "all"    },
+  { id: "favorites:live",        type: "favorites",         kind: "live"   },
+  { id: "favorites:vod",         type: "favorites",         kind: "vod"    },
+  { id: "favorites:series",      type: "favorites",         kind: "series" },
+  { id: "watchlist",             type: "watchlist",         kind: "all"    },
+  { id: "watchlist:vod",         type: "watchlist",         kind: "vod"    },
+  { id: "watchlist:series",      type: "watchlist",         kind: "series" },
+  { id: "recently-added",        type: "recently-added",    kind: "all"    },
+  { id: "recently-added:vod",    type: "recently-added",    kind: "vod"    },
+  { id: "recently-added:series", type: "recently-added",    kind: "series" },
+])
+
+export const DEFAULT_HUB_STRIPS = Object.freeze([
+  "continue-watching",
+  "favorites",
+  "watchlist",
+  "recently-added",
+])
 export const PROGRESS_RETENTION_VALUES = [30, 90, 180, 0]
 export const DEFAULT_PROGRESS_RETENTION_DAYS = 90
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1
@@ -165,6 +198,102 @@ export function setCloseToTray(on) {
 
 export function syncCloseToTrayToBackend() {
   pushCloseToTrayToBackend(getCloseToTray())
+}
+
+const CATALOG_ID_SET = new Set(HUB_STRIP_CATALOG.map((entry) => entry.id))
+
+function sanitizeHubStripIds(rawIds) {
+  if (!Array.isArray(rawIds)) return null
+  const seen = new Set()
+  const out = []
+  for (const value of rawIds) {
+    if (typeof value !== "string") continue
+    if (!CATALOG_ID_SET.has(value)) continue
+    if (seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+  }
+  return out
+}
+
+/**
+ * Active home-page strips in order. Falls back to defaults on first run
+ * or if the saved value is corrupted. Always returns at least an empty
+ * array (never null).
+ *
+ * @returns {string[]}
+ */
+export function getHubStripIds() {
+  const raw = readLS(KEY_HUB_STRIPS, "")
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      const cleaned = sanitizeHubStripIds(parsed)
+      if (cleaned) return cleaned
+    } catch {}
+  }
+  return [...DEFAULT_HUB_STRIPS]
+}
+
+/**
+ * @returns {HubStripDefinition[]}
+ */
+export function getHubStrips() {
+  const ids = getHubStripIds()
+  const byId = new Map(HUB_STRIP_CATALOG.map((entry) => [entry.id, entry]))
+  return ids
+    .map((id) => byId.get(id))
+    .filter(/** @type {(x: HubStripDefinition | undefined) => x is HubStripDefinition} */ (Boolean))
+}
+
+function emitHubStripsChanged(ids) {
+  document.dispatchEvent(
+    new CustomEvent(HUB_STRIPS_EVENT, { detail: { ids } }),
+  )
+}
+
+export function setHubStripIds(ids) {
+  const cleaned = sanitizeHubStripIds(ids) || [...DEFAULT_HUB_STRIPS]
+  writeLS(KEY_HUB_STRIPS, JSON.stringify(cleaned))
+  emitHubStripsChanged(cleaned)
+}
+
+/**
+ * Move a strip by `delta` positions. Returns the new id order, or null
+ * if nothing changed (out of bounds or unknown id).
+ */
+export function moveHubStrip(id, delta) {
+  const current = getHubStripIds()
+  const idx = current.indexOf(id)
+  if (idx < 0) return null
+  const target = idx + delta
+  if (target < 0 || target >= current.length) return null
+  const next = current.slice()
+  const [moved] = next.splice(idx, 1)
+  next.splice(target, 0, moved)
+  setHubStripIds(next)
+  return next
+}
+
+export function addHubStrip(id) {
+  if (!CATALOG_ID_SET.has(id)) return null
+  const current = getHubStripIds()
+  if (current.includes(id)) return current
+  const next = [...current, id]
+  setHubStripIds(next)
+  return next
+}
+
+export function removeHubStrip(id) {
+  const current = getHubStripIds()
+  if (!current.includes(id)) return current
+  const next = current.filter((entry) => entry !== id)
+  setHubStripIds(next)
+  return next
+}
+
+export function resetHubStrips() {
+  setHubStripIds([...DEFAULT_HUB_STRIPS])
 }
 
 // Continue Watching retention

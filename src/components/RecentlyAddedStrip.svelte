@@ -1,5 +1,6 @@
 <script>
   // Hub "Recently added" strip - mixes VOD + series sorted by `added` ts.
+  // Pass `kind` to filter to a single content kind ("vod" / "series").
   import { onMount } from "svelte"
   import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -7,6 +8,9 @@
   import { fmtImdbRating } from "@/scripts/lib/format.js"
 
   const STRIP_LIMIT = 12
+
+  /** @type {{ kind?: "all" | "vod" | "series" }} */
+  let { kind: filterKind = "all" } = $props()
 
   /** @type {Array<{
    *   kind: "vod" | "series",
@@ -23,6 +27,13 @@
   // Wrapper reads the locale rune so {tr(...)} template effects track it
   // and re-evaluate on LOCALE_EVENT.
   const tr = (key, params) => (locale, t(key, params))
+
+  const titleKey = $derived(
+    filterKind === "all" ? "nav.recentlyAdded" : `hub.strip.recentlyAdded.${filterKind}`,
+  )
+  const viewAllHref = $derived(
+    filterKind === "all" ? "/recently-added" : `/recently-added?kind=${filterKind}`,
+  )
 
   function buildEntry(item, kind) {
     const subtitle = kind === "vod" ? "Movie" : "Series"
@@ -49,16 +60,22 @@
       return
     }
     activePlaylistId = active._id
+    const wantVod = filterKind === "all" || filterKind === "vod"
+    const wantSeries = filterKind === "all" || filterKind === "series"
     await Promise.all([
-      hydrateCache(active._id, "vod"),
-      hydrateCache(active._id, "series"),
+      wantVod ? hydrateCache(active._id, "vod") : Promise.resolve(),
+      wantSeries ? hydrateCache(active._id, "series") : Promise.resolve(),
     ])
-    const vod = (getCached(active._id, "vod")?.data || []).filter(
-      (item) => item && item.id && (item.added || 0) > 0
-    )
-    const series = (getCached(active._id, "series")?.data || []).filter(
-      (item) => item && item.id && (item.added || 0) > 0
-    )
+    const vod = wantVod
+      ? (getCached(active._id, "vod")?.data || []).filter(
+          (item) => item && item.id && (item.added || 0) > 0,
+        )
+      : []
+    const series = wantSeries
+      ? (getCached(active._id, "series")?.data || []).filter(
+          (item) => item && item.id && (item.added || 0) > 0,
+        )
+      : []
     const merged = [
       ...vod.map((item) => ({ ts: Number(item.added) || 0, kind: "vod", item })),
       ...series.map((item) => ({ ts: Number(item.added) || 0, kind: "series", item })),
@@ -101,14 +118,14 @@
 
 {#if entries.length}
   <section
-    aria-label={tr("nav.recentlyAdded")}
+    aria-label={tr(titleKey)}
     class="ra-section flex flex-col gap-3 shrink-0">
     <div class="hub-section-head px-1">
       <div class="hub-section-head__title">
-        <h2 class="hub-section-head__heading">{tr("nav.recentlyAdded")}</h2>
+        <h2 class="hub-section-head__heading">{tr(titleKey)}</h2>
       </div>
       <a
-        href="/recently-added"
+        href={viewAllHref}
         class="hub-section-head__count text-fg-3 hover:text-accent focus-visible:text-accent transition-colors">
         {tr("strip.viewAll")}
         <svg viewBox="0 0 24 24" width="0.85em" height="0.85em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="ml-0.5 inline-block align-[-1px]">

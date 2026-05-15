@@ -1,9 +1,6 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import ContinueWatching from "@/components/ContinueWatching.svelte";
-import FavoritesStrip from "@/components/FavoritesStrip.svelte";
-import WatchlistStrip from "@/components/WatchlistStrip.svelte";
-import RecentlyAddedStrip from "@/components/RecentlyAddedStrip.svelte";
+import HubStrips from "@/components/HubStrips.svelte";
 import WelcomeCard from "@/components/WelcomeCard.astro";
 import {
 	IconDeviceTv,
@@ -177,10 +174,7 @@ import {
 			</a>
 		</nav>
 
-		<ContinueWatching client:load />
-		<FavoritesStrip client:idle />
-		<WatchlistStrip client:idle />
-		<RecentlyAddedStrip client:idle />
+		<HubStrips client:load />
 
 		<div
 			id="app-version"
