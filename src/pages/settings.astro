@@ -31,6 +31,7 @@ import {
   IconSparkles,
   IconBolt,
   IconPlayerPlay,
+  IconAppWindow,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
@@ -219,6 +220,49 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
                 for (var pIdx = 0; pIdx < perfBtns.length; pIdx++) {
                   var perfBtnOn = perfBtns[pIdx].getAttribute("data-perf") === "on";
                   perfBtns[pIdx].setAttribute("aria-pressed", perfBtnOn === perfOn ? "true" : "false");
+                }
+              }
+            } catch (e) {}
+          </script>
+        </article>
+
+        <!-- Close-button behavior: desktop only. Reveals from JS below. -->
+        <article
+          id="close-behavior-section"
+          class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 hidden">
+          <div class="flex items-start gap-3">
+            <span class="icon-mark">
+              <IconAppWindow aria-hidden="true" stroke={2} />
+            </span>
+            <div class="flex flex-col gap-1 min-w-0">
+              <h3 data-i18n="settings.closeBehavior.title" class="text-base font-semibold">Close button behavior</h3>
+              <p data-i18n="settings.closeBehavior.helper" class="text-xs text-fg-3">
+                What happens when you click the window's X. "Minimize to tray" keeps the app running in the system tray so background features (programme reminders, downloads) keep working. "Quit" exits the app like other windows.
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <span data-i18n="settings.closeBehavior.label" class="text-eyebrow font-medium uppercase text-fg-3">Close button</span>
+            <div
+              id="settings-close-behavior"
+              class="grid grid-cols-2 gap-2"
+              role="radiogroup"
+              aria-label="Close button behavior"
+              data-i18n-attr="aria-label:settings.closeBehavior.label">
+              <button type="button" data-close-behavior="tray" aria-pressed="false" data-i18n="settings.closeBehavior.tray" class="close-behavior-btn btn">Minimize to tray</button>
+              <button type="button" data-close-behavior="quit" aria-pressed="false" data-i18n="settings.closeBehavior.quit" class="close-behavior-btn btn">Quit</button>
+            </div>
+          </div>
+          <script is:inline>
+            try {
+              var rawClose = localStorage.getItem("xt_close_to_tray");
+              var closeToTray = rawClose !== "0";
+              var closeGroup = document.getElementById("settings-close-behavior");
+              if (closeGroup) {
+                var closeBtns = closeGroup.querySelectorAll(".close-behavior-btn");
+                for (var cIdx = 0; cIdx < closeBtns.length; cIdx++) {
+                  var btnIsTray = closeBtns[cIdx].getAttribute("data-close-behavior") === "tray";
+                  closeBtns[cIdx].setAttribute("aria-pressed", btnIsTray === closeToTray ? "true" : "false");
                 }
               }
             } catch (e) {}
@@ -946,6 +990,8 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       setDownloadConcurrency,
       getPerfMode,
       setPerfMode,
+      getCloseToTray,
+      setCloseToTray,
       getProgressRetentionDays,
       setProgressRetentionDays,
     } from "@/scripts/lib/app-settings.js"
@@ -1759,6 +1805,38 @@ import PlayerPicker from "@/components/PlayerPicker.svelte"
       syncPerfModeButtons()
     })
     syncPerfModeButtons()
+
+    // ---------------------------------------------------------------------
+    // Close-button behavior (desktop only). Section starts hidden in the
+    // markup; reveal on desktop Tauri only since web/Android have no
+    // application-managed close button. setCloseToTray() pushes the new
+    // value to the Rust side via a Tauri command immediately.
+    // ---------------------------------------------------------------------
+    {
+      const closeSection = document.getElementById("close-behavior-section")
+      const closeGroup = document.getElementById("settings-close-behavior")
+      const closeBehaviorAvailable =
+        !!(window.__TAURI_INTERNALS__ || window.__TAURI__) &&
+        !/Android/i.test(navigator.userAgent || "")
+      if (closeSection && closeBehaviorAvailable) {
+        closeSection.classList.remove("hidden")
+      }
+      function syncCloseBehaviorButtons() {
+        const current = getCloseToTray()
+        for (const btn of closeGroup?.querySelectorAll(".close-behavior-btn") || []) {
+          const isTray = btn.dataset.closeBehavior === "tray"
+          btn.setAttribute("aria-pressed", String(isTray === current))
+        }
+      }
+      closeGroup?.addEventListener("click", (event) => {
+        const target = /** @type {HTMLElement} */ (event.target)
+        const btn = target.closest(".close-behavior-btn")
+        if (!btn) return
+        setCloseToTray(btn.dataset.closeBehavior === "tray")
+        syncCloseBehaviorButtons()
+      })
+      syncCloseBehaviorButtons()
+    }
 
     // ---------------------------------------------------------------------
     // Continue Watching retention: 30 / 90 / 180 days or Never. Read by

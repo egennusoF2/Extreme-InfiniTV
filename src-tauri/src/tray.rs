@@ -17,13 +17,28 @@
 // `src/scripts/lib/tray-handler.ts` can take over - keeps URL routing
 // logic on the JS side where the rest of the app lives.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
 
+// Shared flag toggled from the frontend via `set_close_to_tray`
+#[derive(Default)]
+pub struct CloseToTrayState(pub Arc<AtomicBool>);
+
+#[tauri::command]
+pub fn set_close_to_tray(enabled: bool, state: tauri::State<'_, CloseToTrayState>) {
+    state.0.store(enabled, Ordering::Relaxed);
+}
+
 pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let close_to_tray_flag = Arc::new(AtomicBool::new(true));
+    app.manage(CloseToTrayState(close_to_tray_flag.clone()));
+
     let show_hide = MenuItem::with_id(app, "show_hide", "Show / Hide window", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let open_livetv = MenuItem::with_id(app, "nav:/livetv", "Live TV", true, None::<&str>)?;
@@ -103,8 +118,12 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let window_for_hide = main_window.clone();
             main_window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
+                    if !close_to_tray_flag.load(Ordering::Relaxed) {
+                        return;
+                    }
                     api.prevent_close();
                     let _ = window_for_hide.hide();
+                    let _ = window_for_hide.emit("xt:tray:hidden-to-tray", ());
                 }
             });
         }

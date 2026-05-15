@@ -61,6 +61,7 @@ pub fn run() {
             discord::discord_clear,
             discord::discord_disconnect,
             external_player::launch_external_player,
+            tray::set_close_to_tray,
         ]);
 
     #[cfg(target_os = "android")]

@@ -10,11 +10,13 @@ const KEY_PLAYER_ARGS_MPV = "xt_player_args_mpv"
 const KEY_PLAYER_ARGS_VLC = "xt_player_args_vlc"
 const KEY_PLAYER_REUSE_MPV = "xt_player_reuse_mpv"
 const KEY_PLAYER_REUSE_VLC = "xt_player_reuse_vlc"
+const KEY_CLOSE_TO_TRAY = "xt_close_to_tray"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
 export const PROGRESS_RETENTION_EVENT = "xt:progress-retention-changed"
 export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
+export const CLOSE_TO_TRAY_EVENT = "xt:close-to-tray-changed"
 export const PROGRESS_RETENTION_VALUES = [30, 90, 180, 0]
 export const DEFAULT_PROGRESS_RETENTION_DAYS = 90
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1
@@ -124,6 +126,45 @@ export function setPerfMode(on) {
       new CustomEvent(PERF_MODE_EVENT, { detail: { value: !!on } })
     )
   }
+}
+
+// Close-button behavior on desktop. When true (default), the X button hides
+// the window to the system tray (Skype/Discord/Slack style); when false, X
+// fully quits. Desktop-only - on web and Android the X is provided by the
+// OS/browser and Tauri's close-to-tray plumbing doesn't run.
+//
+// Stored as "0" for opt-out so the default ("" / missing) keeps the
+// historical behavior on existing installs. The Rust side defaults to true
+// on launch and is corrected by `syncCloseToTrayToBackend()` once the
+// frontend boots - they only diverge for the few hundred milliseconds
+// before the layout script runs.
+export function getCloseToTray() {
+  return readLS(KEY_CLOSE_TO_TRAY, "") !== "0"
+}
+
+async function pushCloseToTrayToBackend(enabled) {
+  try {
+    if (typeof window === "undefined") return
+    const isTauriRuntime =
+      !!window.__TAURI_INTERNALS__ || !!window.__TAURI__
+    if (!isTauriRuntime) return
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) || ""
+    if (/Android/i.test(ua)) return
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("set_close_to_tray", { enabled: !!enabled })
+  } catch {}
+}
+
+export function setCloseToTray(on) {
+  writeLS(KEY_CLOSE_TO_TRAY, on ? "" : "0")
+  document.dispatchEvent(
+    new CustomEvent(CLOSE_TO_TRAY_EVENT, { detail: { value: !!on } })
+  )
+  pushCloseToTrayToBackend(!!on)
+}
+
+export function syncCloseToTrayToBackend() {
+  pushCloseToTrayToBackend(getCloseToTray())
 }
 
 // Continue Watching retention
