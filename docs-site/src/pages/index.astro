@@ -1,0 +1,63 @@
+---
+import DocsLayout from "../layouts/DocsLayout.astro"
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "")
+
+const cards = [
+  {
+    href: `${base}/getting-started/`,
+    title: "Getting started",
+    body: "Install Extreme InfiniTV, sign in, and start your first stream.",
+  },
+  {
+    href: `${base}/playlists/`,
+    title: "Playlists (Xtream + M3U)",
+    body: "Add Xtream Codes credentials or paste an M3U / M3U8 URL.",
+  },
+  {
+    href: `${base}/external-players/`,
+    title: "External players",
+    body: "Hand off playback to MPV, VLC, or any installed Android video app.",
+  },
+  {
+    href: `${base}/keyboard-and-d-pad/`,
+    title: "Keyboard + D-pad",
+    body: "Shortcuts for desktop and spatial navigation for TV remotes.",
+  },
+  {
+    href: `${base}/troubleshooting/`,
+    title: "Troubleshooting",
+    body: "Test a stream, fix EPG offsets, recover from a failed login.",
+  }
+]
+---
+
+<DocsLayout
+  title="Extreme InfiniTV docs"
+  description="Documentation for Extreme InfiniTV, a cross-platform IPTV player for Xtream Codes and M3U playlists."
+  lede="A cross-platform IPTV player for Xtream Codes and M3U / M3U8 playlists. One app on Windows, macOS, Linux, Android, and the web."
+>
+  <p>
+    Extreme InfiniTV ships on the Microsoft Store, Google Play, GitHub Releases (desktop + Android),
+    and as a web build. The same app runs on a phone in portrait, a tablet, a desktop with keyboard + mouse,
+    and a TV with a D-pad remote.
+  </p>
+
+  <div class="hub-grid">
+    {cards.map((card) => (
+      <a class="hub-card" href={card.href}>
+        <h3>{card.title}</h3>
+        <p>{card.body}</p>
+      </a>
+    ))}
+  </div>
+
+  <h2>Quick links</h2>
+  <ul>
+    <li><a href="https://apps.microsoft.com/detail/9NN162Z0WXSR" rel="noopener" target="_blank">Microsoft Store</a></li>
+    <li><a href="https://play.google.com/store/apps/details?id=com.infinitel8p.xtream" rel="noopener" target="_blank">Google Play</a></li>
+    <li><a href="https://github.com/infinitel8p/Extreme-InfiniTV/releases/latest" rel="noopener" target="_blank">Latest release (Windows / macOS / Linux / Android)</a></li>
+    <li><a href="https://github.com/infinitel8p/Extreme-InfiniTV/discussions" rel="noopener" target="_blank">Discussions</a></li>
+    <li><a href="https://github.com/infinitel8p/Extreme-InfiniTV/issues" rel="noopener" target="_blank">Report an issue</a></li>
+  </ul>
+</DocsLayout>
