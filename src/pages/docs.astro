@@ -39,7 +39,7 @@ import Layout from "@/layouts/Layout.astro"
 
       const sanitizePath = (raw) => {
         if (!raw) return ""
-        const cleaned = raw.replace(/[^a-zA-Z0-9/_\-]/g, "")
+        const cleaned = raw.replace(/[^a-zA-Z0-9/_-]/g, "")
         const noLead = cleaned.replace(/^\/+/, "")
         return noLead.endsWith("/") || noLead === "" ? noLead : noLead + "/"
       }
