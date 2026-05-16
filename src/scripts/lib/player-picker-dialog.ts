@@ -195,9 +195,13 @@ export function openAndroidPlayerPicker(
     const onLocaleChange = () => {
       if (resolved) return
       // Re-open with the same args under the new locale so the labels
-      // refresh. Cheap because the dialog node is reused.
-      settle(null)
-      void openAndroidPlayerPicker(opts).then(resolve)
+      // refresh.
+      resolved = true
+      detach()
+      try {
+        if (dialog.open) dialog.close()
+      } catch {}
+      void openAndroidPlayerPicker(opts).then(resolve, () => resolve(null))
     }
 
     function detach() {

@@ -411,32 +411,14 @@ export function renderDiagnosticInto(
   container.dataset.diagnosticVerdict = result.verdict
 
   container.replaceChildren()
-  // Strip every class this helper owns (palette + visual scaffolding) so
-  // re-rendering doesn't pile them up, but leave anything else the caller
-  // attached - notably outer spacing like `mt-3` that controls the gap
-  // between this panel and the buttons above it.
-  const ownedClasses = [
-    "flex",
-    "flex-col",
-    "gap-2.5",
-    "rounded-xl",
-    "border",
-    "px-3.5",
-    "py-3",
-    "text-sm",
-    "leading-relaxed",
-    "border-ok/40",
-    "bg-ok/5",
-    "border-warn/40",
-    "bg-warn/5",
-    "border-line",
-    "bg-surface",
-    "border-bad/40",
-    "bg-bad/5",
-    "text-fg-2",
-  ]
-  for (const c of ownedClasses) container.classList.remove(c)
-  container.classList.add(
+  // Track managed classes on the element itself
+  const prevManaged = container.dataset.diagnosticManaged
+  if (prevManaged) {
+    for (const cls of prevManaged.split(" ")) {
+      if (cls) container.classList.remove(cls)
+    }
+  }
+  const scaffold = [
     "flex",
     "flex-col",
     "gap-2.5",
@@ -447,22 +429,26 @@ export function renderDiagnosticInto(
     "text-sm",
     "leading-relaxed",
     "transition-colors",
-    "duration-300"
-  )
-  let verdictTextClass = "text-fg"
+    "duration-300",
+  ]
+  let palette: string[]
+  let verdictTextClass: string
   if (result.verdict === "ok") {
-    container.classList.add("border-ok/40", "bg-ok/5")
+    palette = ["border-ok/40", "bg-ok/5"]
     verdictTextClass = "text-ok"
   } else if (result.verdict === "warn") {
-    container.classList.add("border-warn/40", "bg-warn/5")
+    palette = ["border-warn/40", "bg-warn/5"]
     verdictTextClass = "text-warn"
   } else if (result.verdict === "running") {
-    container.classList.add("border-line", "bg-surface")
+    palette = ["border-line", "bg-surface"]
     verdictTextClass = "text-fg-2"
   } else {
-    container.classList.add("border-bad/40", "bg-bad/5")
+    palette = ["border-bad/40", "bg-bad/5"]
     verdictTextClass = "text-bad"
   }
+  const managed = [...scaffold, ...palette]
+  container.classList.add(...managed)
+  container.dataset.diagnosticManaged = managed.join(" ")
 
   const verdictRow = document.createElement("div")
   verdictRow.className = `flex items-center gap-2 font-semibold text-sm transition-colors duration-300 ${verdictTextClass}`

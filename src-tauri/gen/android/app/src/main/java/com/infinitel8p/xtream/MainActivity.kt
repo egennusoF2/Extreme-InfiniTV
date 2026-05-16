@@ -141,6 +141,7 @@ class IntentBridge(private val activity: TauriActivity) {
     private const val MX_FREE_PACKAGE = "com.mxtech.videoplayer.ad"
     private const val DEFAULT_MIME = "video/*"
     private const val ICON_PX = 96
+    private val ALLOWED_SCHEMES = setOf("http", "https", "content", "file")
   }
 
   @JavascriptInterface
@@ -151,8 +152,10 @@ class IntentBridge(private val activity: TauriActivity) {
     isPackageInstalled(MX_PRO_PACKAGE) || isPackageInstalled(MX_FREE_PACKAGE)
 
   /**
-   * Open via system chooser. Returns true if at least one app could handle
-   * the intent (chooser shown), false if nothing on the device can play it.
+   * Open via system chooser. Returns true synchronously when a handler
+   * exists; false when nothing on the device can play the URI. The
+   * startActivity call is dispatched fire-and-forget so the JS bridge
+   * thread never blocks waiting for the launch.
    */
   @JavascriptInterface
   fun viewStream(
@@ -164,31 +167,19 @@ class IntentBridge(private val activity: TauriActivity) {
   ): Boolean {
     val uri = parseUri(url) ?: return false
     val intent = buildViewIntent(uri, mime, userAgent, referer, title)
-    return runOnUiAndDispatch {
-      val chooser = Intent.createChooser(
-        intent,
-        title?.takeIf { it.isNotBlank() } ?: "Open with"
-      )
-      val resolver = activity.packageManager
-      if (intent.resolveActivity(resolver) == null) {
-        return@runOnUiAndDispatch false
-      }
-      try {
-        activity.startActivity(chooser)
-        true
-      } catch (e: ActivityNotFoundException) {
-        Log.w("xtream-rs", "viewStream startActivity threw: $e")
-        false
-      } catch (e: SecurityException) {
-        Log.w("xtream-rs", "viewStream blocked by SecurityException: $e")
-        false
-      }
-    }
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    val chooser = Intent.createChooser(
+      intent,
+      title?.takeIf { it.isNotBlank() } ?: "Open with"
+    )
+    dispatchStartActivity(chooser, "viewStream")
+    return true
   }
 
   /**
-   * Open directly in VLC. Returns true on launch, false if VLC isn't
-   * installed (UI should fall back to viewStream() or hide the button).
+   * Open directly in VLC. Returns true synchronously when VLC is installed
+   * and resolves the intent; false otherwise. UI should fall back to
+   * viewStream() or hide the button on false.
    */
   @JavascriptInterface
   fun openInVlc(
@@ -203,18 +194,9 @@ class IntentBridge(private val activity: TauriActivity) {
     val intent = buildViewIntent(uri, mime, userAgent, referer, title).apply {
       setPackage(VLC_PACKAGE)
     }
-    return runOnUiAndDispatch {
-      try {
-        activity.startActivity(intent)
-        true
-      } catch (e: ActivityNotFoundException) {
-        Log.w("xtream-rs", "openInVlc threw: $e")
-        false
-      } catch (e: SecurityException) {
-        Log.w("xtream-rs", "openInVlc blocked by SecurityException: $e")
-        false
-      }
-    }
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    dispatchStartActivity(intent, "openInVlc")
+    return true
   }
 
   /**
@@ -349,18 +331,9 @@ class IntentBridge(private val activity: TauriActivity) {
     val intent = buildViewIntent(uri, mime, userAgent, referer, title).apply {
       setPackage(pkg)
     }
-    return runOnUiAndDispatch {
-      try {
-        activity.startActivity(intent)
-        true
-      } catch (e: ActivityNotFoundException) {
-        Log.w("xtream-rs", "openInPackage($pkg) threw: $e")
-        false
-      } catch (e: SecurityException) {
-        Log.w("xtream-rs", "openInPackage($pkg) blocked by SecurityException: $e")
-        false
-      }
-    }
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    dispatchStartActivity(intent, "openInPackage($pkg)")
+    return true
   }
 
   private fun escapeJson(value: String): String {
@@ -383,12 +356,18 @@ class IntentBridge(private val activity: TauriActivity) {
   private fun parseUri(url: String?): Uri? {
     val trimmed = url?.trim().orEmpty()
     if (trimmed.isEmpty()) return null
-    return try {
+    val parsed = try {
       Uri.parse(trimmed)
     } catch (e: Throwable) {
       Log.w("xtream-rs", "IntentBridge.parseUri rejected '$trimmed': $e")
-      null
+      return null
     }
+    val scheme = parsed.scheme?.lowercase()
+    if (scheme.isNullOrEmpty() || scheme !in ALLOWED_SCHEMES) {
+      Log.w("xtream-rs", "IntentBridge.parseUri rejected scheme '$scheme'")
+      return null
+    }
+    return parsed
   }
 
   private fun buildViewIntent(
@@ -447,26 +426,18 @@ class IntentBridge(private val activity: TauriActivity) {
     }
   }
 
-  private fun runOnUiAndDispatch(block: () -> Boolean): Boolean {
-    if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-      return block()
-    }
-    val latch = java.util.concurrent.CountDownLatch(1)
-    val result = java.util.concurrent.atomic.AtomicBoolean(false)
+  // Fire-and-forget UI-thread launch
+  private fun dispatchStartActivity(intent: Intent, context: String) {
     activity.runOnUiThread {
       try {
-        result.set(block())
+        activity.startActivity(intent)
+      } catch (e: ActivityNotFoundException) {
+        Log.w("xtream-rs", "$context startActivity threw: $e")
+      } catch (e: SecurityException) {
+        Log.w("xtream-rs", "$context blocked by SecurityException: $e")
       } catch (e: Throwable) {
-        Log.w("xtream-rs", "IntentBridge UI dispatch threw: $e")
-      } finally {
-        latch.countDown()
+        Log.w("xtream-rs", "$context launch threw: $e")
       }
-    }
-    return try {
-      latch.await(2, java.util.concurrent.TimeUnit.SECONDS) && result.get()
-    } catch (e: InterruptedException) {
-      Thread.currentThread().interrupt()
-      false
     }
   }
 }

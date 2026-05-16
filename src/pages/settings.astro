@@ -31,17 +31,18 @@ import {
   IconSparkles,
   IconBolt,
   IconPlayerPlay,
-  IconAppWindow,
   IconBook,
   IconRocket,
   IconLayoutDashboard,
-  IconDeviceTv,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
 import FavoritesReorder from "@/components/FavoritesReorder.svelte"
 import HubStripsEditor from "@/components/HubStripsEditor.svelte"
 import PlayerPicker from "@/components/PlayerPicker.svelte"
+import TvOverscanCard from "@/components/TvOverscanCard.svelte"
+import CloseToTrayCard from "@/components/CloseToTrayCard.svelte"
+import ConnectionLimitBanner from "@/components/ConnectionLimitBanner.svelte"
 
 interface NavCard { id: string; labelKey: string; label: string }
 interface NavSection { id: string; labelKey: string; label: string; cards: NavCard[]; danger?: boolean }
@@ -295,51 +296,7 @@ const navStructure: NavSection[] = [
           </script>
         </article>
 
-        <!-- TV safe area: inset content from the viewport edges to
-             compensate for TV overscan. Auto-defaults to 4% on Android
-             TV first launch (see inline script in Layout.astro). -->
-        <article id="card-tv-overscan" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 scroll-mt-6">
-          <div class="flex items-start gap-3">
-            <span class="icon-mark">
-              <IconDeviceTv aria-hidden="true" stroke={2} />
-            </span>
-            <div class="flex flex-col gap-1 min-w-0">
-              <h3 data-i18n="settings.tvOverscan.title" class="text-base font-semibold">TV safe area</h3>
-              <p data-i18n="settings.tvOverscan.helperLong" class="text-xs text-fg-3">
-                Most TVs hide a small band at each edge of the picture (overscan). If sidebar icons or version text look cut off, increase this to inset the whole UI by a few percent.
-              </p>
-            </div>
-          </div>
-          <div class="flex flex-col gap-2">
-            <span data-i18n="settings.tvOverscan.label" class="text-eyebrow font-medium uppercase text-fg-3">Edge inset</span>
-            <div
-              id="settings-tv-overscan"
-              class="grid grid-cols-3 sm:grid-cols-5 gap-2"
-              role="radiogroup"
-              aria-label="TV safe area"
-              data-i18n-attr="aria-label:settings.tvOverscan.label">
-              <button type="button" data-overscan="0" aria-pressed="false" data-i18n="settings.tvOverscan.off" class="tv-overscan-btn btn">Off</button>
-              <button type="button" data-overscan="2" aria-pressed="false" class="tv-overscan-btn btn">2%</button>
-              <button type="button" data-overscan="4" aria-pressed="false" class="tv-overscan-btn btn">4%</button>
-              <button type="button" data-overscan="6" aria-pressed="false" class="tv-overscan-btn btn">6%</button>
-              <button type="button" data-overscan="8" aria-pressed="false" class="tv-overscan-btn btn">8%</button>
-            </div>
-          </div>
-          <script is:inline>
-            try {
-              var savedOverscan = parseFloat(localStorage.getItem("xt_tv_overscan") || "0");
-              if (!isFinite(savedOverscan) || savedOverscan < 0 || savedOverscan > 8) savedOverscan = 0;
-              var overscanGroup = document.getElementById("settings-tv-overscan");
-              if (overscanGroup) {
-                var overscanBtns = overscanGroup.querySelectorAll(".tv-overscan-btn");
-                for (var oi = 0; oi < overscanBtns.length; oi++) {
-                  var btnOverscan = parseFloat(overscanBtns[oi].getAttribute("data-overscan") || "0");
-                  overscanBtns[oi].setAttribute("aria-pressed", Math.abs(btnOverscan - savedOverscan) < 0.001 ? "true" : "false");
-                }
-              }
-            } catch (e) {}
-          </script>
-        </article>
+        <TvOverscanCard client:load />
 
         <!-- Home page sections: which hub strips render, and in what order. -->
         <article id="card-hub-strips" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 scroll-mt-6">
@@ -357,48 +314,7 @@ const navStructure: NavSection[] = [
           <HubStripsEditor client:load />
         </article>
 
-        <!-- Close-button behavior: desktop only. Reveals from JS below. -->
-        <article
-          id="close-behavior-section"
-          class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 hidden">
-          <div class="flex items-start gap-3">
-            <span class="icon-mark">
-              <IconAppWindow aria-hidden="true" stroke={2} />
-            </span>
-            <div class="flex flex-col gap-1 min-w-0">
-              <h3 data-i18n="settings.closeBehavior.title" class="text-base font-semibold">Close button behavior</h3>
-              <p data-i18n="settings.closeBehavior.helper" class="text-xs text-fg-3">
-                What happens when you click the window's X. "Minimize to tray" keeps the app running in the system tray so background features (programme reminders, downloads) keep working. "Quit" exits the app like other windows.
-              </p>
-            </div>
-          </div>
-          <div class="flex flex-col gap-2">
-            <span data-i18n="settings.closeBehavior.label" class="text-eyebrow font-medium uppercase text-fg-3">Close button</span>
-            <div
-              id="settings-close-behavior"
-              class="grid grid-cols-2 gap-2"
-              role="radiogroup"
-              aria-label="Close button behavior"
-              data-i18n-attr="aria-label:settings.closeBehavior.label">
-              <button type="button" data-close-behavior="tray" aria-pressed="false" data-i18n="settings.closeBehavior.tray" class="close-behavior-btn btn">Minimize to tray</button>
-              <button type="button" data-close-behavior="quit" aria-pressed="false" data-i18n="settings.closeBehavior.quit" class="close-behavior-btn btn">Quit</button>
-            </div>
-          </div>
-          <script is:inline>
-            try {
-              var rawClose = localStorage.getItem("xt_close_to_tray");
-              var closeToTray = rawClose !== "0";
-              var closeGroup = document.getElementById("settings-close-behavior");
-              if (closeGroup) {
-                var closeBtns = closeGroup.querySelectorAll(".close-behavior-btn");
-                for (var cIdx = 0; cIdx < closeBtns.length; cIdx++) {
-                  var btnIsTray = closeBtns[cIdx].getAttribute("data-close-behavior") === "tray";
-                  closeBtns[cIdx].setAttribute("aria-pressed", btnIsTray === closeToTray ? "true" : "false");
-                }
-              }
-            } catch (e) {}
-          </script>
-        </article>
+        <CloseToTrayCard client:load />
 
       </div>
     </section>
@@ -705,17 +621,7 @@ const navStructure: NavSection[] = [
               class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
           </div>
 
-          <div
-            id="settings-connection-limit"
-            class="hidden flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-xs transition-colors"
-            role="status"
-            aria-live="polite">
-            <span class="flex items-center gap-2">
-              <span data-role="dot" class="size-2.5 rounded-full shrink-0" aria-hidden="true"></span>
-              <span data-role="label" class="font-medium"></span>
-            </span>
-            <span data-role="detail" class="text-fg-3 leading-relaxed"></span>
-          </div>
+          <ConnectionLimitBanner client:load />
 
           <div class="flex flex-col gap-1.5">
             <span data-i18n="settings.downloadsFolder.concurrency" class="text-eyebrow font-medium uppercase text-fg-3">
@@ -1184,10 +1090,6 @@ const navStructure: NavSection[] = [
       setDownloadConcurrency,
       getPerfMode,
       setPerfMode,
-      getTvOverscan,
-      setTvOverscan,
-      getCloseToTray,
-      setCloseToTray,
       getProgressRetentionDays,
       setProgressRetentionDays,
     } from "@/scripts/lib/app-settings.js"
@@ -1195,7 +1097,6 @@ const navStructure: NavSection[] = [
       ensureUserInfo,
       getMaxConnectionsSync,
       getActiveConnectionsSync,
-      getConnectionLimitWarning,
       USER_INFO_LOADED_EVENT,
     } from "@/scripts/lib/account-info.js"
     import { isDownloadable, scanDownloadsFolder } from "@/scripts/lib/downloads.js"
@@ -2004,65 +1905,6 @@ const navStructure: NavSection[] = [
     syncPerfModeButtons()
 
     // ---------------------------------------------------------------------
-    // TV safe area - setTvOverscan() updates the CSS var on `<html>` so
-    // body padding refreshes immediately; the inline script in
-    // Layout.astro picks the same value up on the next page load.
-    // ---------------------------------------------------------------------
-    const tvOverscanGroup = document.getElementById("settings-tv-overscan")
-    function syncTvOverscanButtons() {
-      const current = getTvOverscan()
-      for (const btn of tvOverscanGroup?.querySelectorAll(".tv-overscan-btn") || []) {
-        const value = parseFloat(btn.dataset.overscan || "0")
-        btn.setAttribute(
-          "aria-pressed",
-          String(Math.abs(value - current) < 0.001),
-        )
-      }
-    }
-    tvOverscanGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".tv-overscan-btn")
-      if (!btn) return
-      const value = parseFloat(btn.dataset.overscan || "0")
-      if (!Number.isFinite(value)) return
-      setTvOverscan(value)
-      syncTvOverscanButtons()
-    })
-    syncTvOverscanButtons()
-
-    // ---------------------------------------------------------------------
-    // Close-button behavior (desktop only). Section starts hidden in the
-    // markup; reveal on desktop Tauri only since web/Android have no
-    // application-managed close button. setCloseToTray() pushes the new
-    // value to the Rust side via a Tauri command immediately.
-    // ---------------------------------------------------------------------
-    {
-      const closeSection = document.getElementById("close-behavior-section")
-      const closeGroup = document.getElementById("settings-close-behavior")
-      const closeBehaviorAvailable =
-        !!(window.__TAURI_INTERNALS__ || window.__TAURI__) &&
-        !/Android/i.test(navigator.userAgent || "")
-      if (closeSection && closeBehaviorAvailable) {
-        closeSection.classList.remove("hidden")
-      }
-      function syncCloseBehaviorButtons() {
-        const current = getCloseToTray()
-        for (const btn of closeGroup?.querySelectorAll(".close-behavior-btn") || []) {
-          const isTray = btn.dataset.closeBehavior === "tray"
-          btn.setAttribute("aria-pressed", String(isTray === current))
-        }
-      }
-      closeGroup?.addEventListener("click", (event) => {
-        const target = /** @type {HTMLElement} */ (event.target)
-        const btn = target.closest(".close-behavior-btn")
-        if (!btn) return
-        setCloseToTray(btn.dataset.closeBehavior === "tray")
-        syncCloseBehaviorButtons()
-      })
-      syncCloseBehaviorButtons()
-    }
-
-    // ---------------------------------------------------------------------
     // Continue Watching retention: 30 / 90 / 180 days or Never. Read by
     // trimBucket() in preferences.js on every progress save, so flipping
     // here takes effect on the next playback tick - no reload required.
@@ -2452,59 +2294,6 @@ const navStructure: NavSection[] = [
       return getActiveConnectionsSync(active?.selectedId || "")
     }
 
-    const connectionLimitEl = document.getElementById("settings-connection-limit")
-    function syncConnectionLimitBanner() {
-      if (!connectionLimitEl) return
-      const active = JSON.parse(
-        localStorage.getItem("xt_playlists") || '{"selectedId":""}'
-      )
-      const warning = getConnectionLimitWarning(active?.selectedId || "")
-      if (!warning) {
-        connectionLimitEl.classList.add("hidden")
-        connectionLimitEl.classList.remove("flex")
-        return
-      }
-      connectionLimitEl.classList.remove("hidden")
-      connectionLimitEl.classList.add("flex")
-      const dot = connectionLimitEl.querySelector("[data-role='dot']")
-      const label = connectionLimitEl.querySelector("[data-role='label']")
-      const detail = connectionLimitEl.querySelector("[data-role='detail']")
-      const tints = {
-        ok: { border: "border-line", bg: "bg-surface-2/40", dot: "bg-fg-3", label: "text-fg" },
-        warn: { border: "border-warn/40", bg: "bg-warn/5", dot: "bg-warn", label: "text-warn" },
-        crit: { border: "border-bad/40", bg: "bg-bad/10", dot: "bg-bad", label: "text-bad" },
-      }
-      const tint = tints[warning.level]
-      const labelKey = {
-        ok: "settings.connectionLimit.ok",
-        warn: "settings.connectionLimit.warn",
-        crit: "settings.connectionLimit.crit",
-      }[warning.level]
-      const allTintClasses = [
-        "border-line", "border-warn/40", "border-bad/40",
-        "bg-surface-2/40", "bg-warn/5", "bg-bad/10",
-      ]
-      const allDotClasses = ["bg-fg-3", "bg-ok", "bg-warn", "bg-bad"]
-      const allLabelClasses = ["text-fg", "text-warn", "text-bad"]
-      for (const c of allTintClasses) connectionLimitEl.classList.remove(c)
-      connectionLimitEl.classList.add(tint.border, tint.bg)
-      if (dot) {
-        for (const c of allDotClasses) dot.classList.remove(c)
-        dot.classList.add(tint.dot)
-      }
-      if (label) {
-        for (const c of allLabelClasses) label.classList.remove(c)
-        label.classList.add(tint.label)
-        label.textContent = t(labelKey)
-      }
-      if (detail) {
-        detail.textContent = t("settings.connectionLimit.detail", {
-          current: String(warning.currentCons),
-          max: String(warning.maxCons),
-        })
-      }
-    }
-
     function syncConcurrencyButtons() {
       if (!concurrencyGroup) return
       const current = getDownloadConcurrency()
@@ -2546,27 +2335,25 @@ const navStructure: NavSection[] = [
 
     // Refresh user_info on every active-playlist change and on Settings load
     // so the cap reflects the current provider, not whatever was warmed last.
+    // The connection-limit banner subscribes to USER_INFO_LOADED_EVENT itself
+    // (see ConnectionLimitBanner.svelte); we just kick the hydration.
     async function refreshUserInfoForActive() {
       try {
         const active = await getActiveEntry()
         if (!active) {
           syncConcurrencyButtons()
-          syncConnectionLimitBanner()
           return
         }
         const creds = await loadCreds()
         await ensureUserInfo(creds, active._id)
         syncConcurrencyButtons()
-        syncConnectionLimitBanner()
       } catch {
         syncConcurrencyButtons()
-        syncConnectionLimitBanner()
       }
     }
     refreshUserInfoForActive()
     document.addEventListener(USER_INFO_LOADED_EVENT, () => {
       syncConcurrencyButtons()
-      syncConnectionLimitBanner()
     })
     document.addEventListener("xt:active-changed", refreshUserInfoForActive)
 
