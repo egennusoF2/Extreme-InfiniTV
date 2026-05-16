@@ -88,6 +88,33 @@ const documentTitle = pageTitle
           document.documentElement.setAttribute("data-perf-mode", "on");
         }
 
+        // TV safe-area inset
+        var overscanStored = localStorage.getItem("xt_tv_overscan");
+        var overscan = parseFloat(overscanStored || "");
+        if (!isFinite(overscan) || overscan < 0 || overscan > 8) {
+          if (overscanStored === null) {
+            var overscanIsTv = false;
+            try {
+              if (window.AndroidDeviceInfo && typeof window.AndroidDeviceInfo.isTv === "function") {
+                overscanIsTv = !!window.AndroidDeviceInfo.isTv();
+              }
+            } catch (e) {}
+            if (overscanIsTv) {
+              overscan = 4;
+              localStorage.setItem("xt_tv_overscan", "4");
+              localStorage.setItem("xt_tv_overscan_auto", "1");
+            } else {
+              overscan = 0;
+            }
+          } else {
+            overscan = 0;
+          }
+        }
+        if (overscan > 0) {
+          document.documentElement.style.setProperty("--xt-tv-overscan", String(overscan));
+          document.documentElement.setAttribute("data-tv-overscan", "");
+        }
+
         var KNOWN_LOCALES = ["en","es","de","fr","pt-BR","it","ru","zh","ja","tr","ar","ur","nl","hi","id","pl"];
         var RTL_LOCALES = ["ar","ur"];
         var storedLocale = localStorage.getItem("xt_locale") || "";
@@ -239,6 +266,30 @@ const documentTitle = pageTitle
   }
   html[data-tauri-desktop] body {
     padding-top: var(--xt-titlebar-h);
+  }
+
+  /* TV overscan: shrink the layout in from each viewport edge so
+     content stays inside the TV's safe area. Sidebar uses `sticky`
+     (not fixed), so body padding cascades through the whole flex
+     layout. Toast offsets +overscan-y in toast.ts so notifications
+     stay visible too. */
+  html[data-tv-overscan] body {
+    padding-top: max(
+      env(safe-area-inset-top),
+      calc(var(--xt-tv-overscan, 0) * 1vh)
+    );
+    padding-right: max(
+      env(safe-area-inset-right),
+      calc(var(--xt-tv-overscan, 0) * 1vw)
+    );
+    padding-bottom: calc(var(--xt-tv-overscan, 0) * 1vh);
+    padding-left: calc(var(--xt-tv-overscan, 0) * 1vw);
+  }
+  html[data-tauri-desktop][data-tv-overscan] body {
+    padding-top: max(
+      env(safe-area-inset-top),
+      calc(var(--xt-titlebar-h) + var(--xt-tv-overscan, 0) * 1vh)
+    );
   }
 
   @media (prefers-reduced-motion: reduce) {

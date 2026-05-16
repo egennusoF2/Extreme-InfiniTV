@@ -12,6 +12,7 @@ const KEY_PLAYER_REUSE_MPV = "xt_player_reuse_mpv"
 const KEY_PLAYER_REUSE_VLC = "xt_player_reuse_vlc"
 const KEY_CLOSE_TO_TRAY = "xt_close_to_tray"
 const KEY_HUB_STRIPS = "xt_hub_strips"
+const KEY_TV_OVERSCAN = "xt_tv_overscan"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
@@ -19,6 +20,9 @@ export const PROGRESS_RETENTION_EVENT = "xt:progress-retention-changed"
 export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
 export const CLOSE_TO_TRAY_EVENT = "xt:close-to-tray-changed"
 export const HUB_STRIPS_EVENT = "xt:hub-strips-changed"
+export const TV_OVERSCAN_EVENT = "xt:tv-overscan-changed"
+export const TV_OVERSCAN_VALUES = [0, 2, 4, 6, 8]
+export const DEFAULT_TV_OVERSCAN = 0
 
 /**
  * Catalog of every home-page strip the user can add. `kind` is the
@@ -157,6 +161,38 @@ export function setPerfMode(on) {
     else document.documentElement.removeAttribute("data-perf-mode")
     document.dispatchEvent(
       new CustomEvent(PERF_MODE_EVENT, { detail: { value: !!on } })
+    )
+  }
+}
+
+// TV safe-area inset
+export function getTvOverscan() {
+  const raw = readLS(KEY_TV_OVERSCAN, "")
+  const parsed = parseFloat(raw)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 8) {
+    return DEFAULT_TV_OVERSCAN
+  }
+  return parsed
+}
+
+export function setTvOverscan(percent) {
+  let next = Number(percent)
+  if (!Number.isFinite(next) || next < 0) next = 0
+  if (next > 8) next = 8
+  try {
+    localStorage.setItem(KEY_TV_OVERSCAN, String(next))
+  } catch {}
+  if (typeof document !== "undefined") {
+    const root = document.documentElement
+    if (next > 0) {
+      root.style.setProperty("--xt-tv-overscan", String(next))
+      root.setAttribute("data-tv-overscan", "")
+    } else {
+      root.style.removeProperty("--xt-tv-overscan")
+      root.removeAttribute("data-tv-overscan")
+    }
+    document.dispatchEvent(
+      new CustomEvent(TV_OVERSCAN_EVENT, { detail: { value: next } })
     )
   }
 }

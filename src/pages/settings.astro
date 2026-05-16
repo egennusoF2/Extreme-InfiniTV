@@ -35,6 +35,7 @@ import {
   IconBook,
   IconRocket,
   IconLayoutDashboard,
+  IconDeviceTv,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
@@ -51,6 +52,7 @@ const navStructure: NavSection[] = [
     { id: "card-language",          labelKey: "settings.section.language",     label: "Language" },
     { id: "card-display",           labelKey: "settings.section.display",      label: "Display" },
     { id: "card-perf-mode",         labelKey: "settings.perfMode.title",       label: "Performance mode" },
+    { id: "card-tv-overscan",       labelKey: "settings.tvOverscan.title",     label: "TV safe area" },
     { id: "card-hub-strips",        labelKey: "settings.hubStrips.title",      label: "Home page sections" },
     { id: "close-behavior-section", labelKey: "settings.closeBehavior.title",  label: "Close button behavior" },
   ]},
@@ -287,6 +289,52 @@ const navStructure: NavSection[] = [
                 for (var pIdx = 0; pIdx < perfBtns.length; pIdx++) {
                   var perfBtnOn = perfBtns[pIdx].getAttribute("data-perf") === "on";
                   perfBtns[pIdx].setAttribute("aria-pressed", perfBtnOn === perfOn ? "true" : "false");
+                }
+              }
+            } catch (e) {}
+          </script>
+        </article>
+
+        <!-- TV safe area: inset content from the viewport edges to
+             compensate for TV overscan. Auto-defaults to 4% on Android
+             TV first launch (see inline script in Layout.astro). -->
+        <article id="card-tv-overscan" class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 scroll-mt-6">
+          <div class="flex items-start gap-3">
+            <span class="icon-mark">
+              <IconDeviceTv aria-hidden="true" stroke={2} />
+            </span>
+            <div class="flex flex-col gap-1 min-w-0">
+              <h3 data-i18n="settings.tvOverscan.title" class="text-base font-semibold">TV safe area</h3>
+              <p data-i18n="settings.tvOverscan.helperLong" class="text-xs text-fg-3">
+                Most TVs hide a small band at each edge of the picture (overscan). If sidebar icons or version text look cut off, increase this to inset the whole UI by a few percent.
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-col gap-2">
+            <span data-i18n="settings.tvOverscan.label" class="text-eyebrow font-medium uppercase text-fg-3">Edge inset</span>
+            <div
+              id="settings-tv-overscan"
+              class="grid grid-cols-3 sm:grid-cols-5 gap-2"
+              role="radiogroup"
+              aria-label="TV safe area"
+              data-i18n-attr="aria-label:settings.tvOverscan.label">
+              <button type="button" data-overscan="0" aria-pressed="false" data-i18n="settings.tvOverscan.off" class="tv-overscan-btn btn">Off</button>
+              <button type="button" data-overscan="2" aria-pressed="false" class="tv-overscan-btn btn">2%</button>
+              <button type="button" data-overscan="4" aria-pressed="false" class="tv-overscan-btn btn">4%</button>
+              <button type="button" data-overscan="6" aria-pressed="false" class="tv-overscan-btn btn">6%</button>
+              <button type="button" data-overscan="8" aria-pressed="false" class="tv-overscan-btn btn">8%</button>
+            </div>
+          </div>
+          <script is:inline>
+            try {
+              var savedOverscan = parseFloat(localStorage.getItem("xt_tv_overscan") || "0");
+              if (!isFinite(savedOverscan) || savedOverscan < 0 || savedOverscan > 8) savedOverscan = 0;
+              var overscanGroup = document.getElementById("settings-tv-overscan");
+              if (overscanGroup) {
+                var overscanBtns = overscanGroup.querySelectorAll(".tv-overscan-btn");
+                for (var oi = 0; oi < overscanBtns.length; oi++) {
+                  var btnOverscan = parseFloat(overscanBtns[oi].getAttribute("data-overscan") || "0");
+                  overscanBtns[oi].setAttribute("aria-pressed", Math.abs(btnOverscan - savedOverscan) < 0.001 ? "true" : "false");
                 }
               }
             } catch (e) {}
@@ -1136,6 +1184,8 @@ const navStructure: NavSection[] = [
       setDownloadConcurrency,
       getPerfMode,
       setPerfMode,
+      getTvOverscan,
+      setTvOverscan,
       getCloseToTray,
       setCloseToTray,
       getProgressRetentionDays,
@@ -1952,6 +2002,33 @@ const navStructure: NavSection[] = [
       syncPerfModeButtons()
     })
     syncPerfModeButtons()
+
+    // ---------------------------------------------------------------------
+    // TV safe area - setTvOverscan() updates the CSS var on `<html>` so
+    // body padding refreshes immediately; the inline script in
+    // Layout.astro picks the same value up on the next page load.
+    // ---------------------------------------------------------------------
+    const tvOverscanGroup = document.getElementById("settings-tv-overscan")
+    function syncTvOverscanButtons() {
+      const current = getTvOverscan()
+      for (const btn of tvOverscanGroup?.querySelectorAll(".tv-overscan-btn") || []) {
+        const value = parseFloat(btn.dataset.overscan || "0")
+        btn.setAttribute(
+          "aria-pressed",
+          String(Math.abs(value - current) < 0.001),
+        )
+      }
+    }
+    tvOverscanGroup?.addEventListener("click", (event) => {
+      const target = /** @type {HTMLElement} */ (event.target)
+      const btn = target.closest(".tv-overscan-btn")
+      if (!btn) return
+      const value = parseFloat(btn.dataset.overscan || "0")
+      if (!Number.isFinite(value)) return
+      setTvOverscan(value)
+      syncTvOverscanButtons()
+    })
+    syncTvOverscanButtons()
 
     // ---------------------------------------------------------------------
     // Close-button behavior (desktop only). Section starts hidden in the
