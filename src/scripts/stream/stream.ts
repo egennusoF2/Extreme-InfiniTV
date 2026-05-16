@@ -283,18 +283,28 @@ const picker = mountCategoryPicker({
 })
 document.addEventListener("xt:cat-changed", () => scheduleApplyFilter())
 
+function computeRowH() {
+  if (typeof window === "undefined") return 68
+  const rootPx = parseFloat(
+    getComputedStyle(document.documentElement).fontSize || "16"
+  )
+  const base = Number.isFinite(rootPx) && rootPx > 0 ? rootPx : 16
+  return Math.max(56, Math.round(base * 4.25))
+}
+let ROW_H = computeRowH()
+
 function channelSkeletonCount() {
   // Fill the channel list pane regardless of viewport size.
   const containerH = listEl?.clientHeight || 0
   const fallback =
     typeof window !== "undefined" ? (window.innerHeight || 720) - 120 : 720
-  return Math.max(14, Math.ceil(Math.max(containerH, fallback) / 68) + 4)
+  return Math.max(14, Math.ceil(Math.max(containerH, fallback) / ROW_H) + 4)
 }
 
 function renderChannelSkeletons(count) {
   if (!viewport || !spacer) return
   const total = Number.isFinite(count) && count > 0 ? count : channelSkeletonCount()
-  spacer.style.height = `${total * 68}px`
+  spacer.style.height = `${total * ROW_H}px`
   const frag = document.createDocumentFragment()
   // Vary widths so the placeholder looks like a list, not a striped pattern.
   const nameWidths = [62, 78, 54, 70, 86, 60, 72, 50, 80, 64, 76, 58]
@@ -306,7 +316,7 @@ function renderChannelSkeletons(count) {
 
     const row = document.createElement("div")
     row.className = "channel-row flex w-full items-center gap-1"
-    row.style.height = "68px"
+    row.style.height = `${ROW_H}px`
     row.dataset.idx = String(i)
     row.dataset.skeleton = "true"
     row.style.setProperty("--skel-enter-delay", `${enterDelay}ms`)
@@ -328,7 +338,6 @@ function renderChannelSkeletons(count) {
 /** @type {Map<string,string> | null} */
 let categoryMap = null
 
-const ROW_H = 68
 const OVERSCAN_DEFAULT = 6
 const OVERSCAN_PERF = 2
 const isPerfMode = () =>
@@ -2037,6 +2046,24 @@ setInterval(() => {
   if (!getProgrammesSync(activePlaylistId)) return
   refreshNowSlots()
 }, 60 * 1000)
+
+// Window resize (incl. maximize) changes the 0.84vw root font-size and
+// therefore the visual height of channel-row content. Recompute the
+// virtualization unit and re-render so rows still match their content box.
+const handleRowHResize = debounce(() => {
+  const next = computeRowH()
+  if (next === ROW_H) return
+  ROW_H = next
+  if (spacer && filtered) {
+    spacer.style.height = `${filtered.length * ROW_H}px`
+  }
+  if (viewport?.querySelector("[data-skeleton]")) {
+    renderChannelSkeletons()
+  } else {
+    renderVirtual()
+  }
+}, 120)
+window.addEventListener("resize", handleRowHResize)
 
 // ----------------------------
 // Boot

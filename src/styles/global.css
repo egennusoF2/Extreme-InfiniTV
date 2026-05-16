@@ -595,9 +595,10 @@ dialog[open]::backdrop {
 /* ────────────────────────────── */
 .channel-row {
     content-visibility: auto;
-    contain-intrinsic-size: 68px;
+    contain-intrinsic-size: 4.25rem;
     scroll-margin-block: 8px;
     position: relative;
+    overflow: hidden;
 }
 
 .map-row,
