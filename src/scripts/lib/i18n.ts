@@ -4,7 +4,7 @@
 //
 // Locale JSONs live in `src/i18n/<locale>.json`. To add a new language, copy
 // `en.json` to `<code>.json`, translate values, and register the loader in
-// the `LOCALE_LOADERS` table below. See `docs/translations.md`.
+// the `LOCALE_LOADERS` table below. See `docs/src/pages/translations.md`.
 
 import enMessages from "@/i18n/en.json"
 
