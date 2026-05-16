@@ -4,7 +4,7 @@
 //
 // Locale JSONs live in `src/i18n/<locale>.json`. To add a new language, copy
 // `en.json` to `<code>.json`, translate values, and register the loader in
-// the `LOCALE_LOADERS` table below. See `docs/translations.md`.
+// the `LOCALE_LOADERS` table below. See `docs/src/pages/translations.md`.
 
 import enMessages from "@/i18n/en.json"
 
@@ -79,9 +79,8 @@ function isLocaleCode(code: string): code is LocaleCode {
 }
 
 const LOCALE_STORAGE_KEY = "xt_locale"
-// Bumped from v1 to v2 to invalidate stale pre-paint caches from before the
-// EPG-sources strings landed
-const LOCALE_MESSAGES_STORAGE_KEY = "xt_locale_messages_v2"
+// Bumped from v2 to v3 in 1.6.0 to invalidate stale pre-paint caches
+const LOCALE_MESSAGES_STORAGE_KEY = "xt_locale_messages_v3"
 const LOCALE_CHANGED_EVENT = "xt:locale-changed"
 
 const cache = new Map<string, LocaleMessages>()

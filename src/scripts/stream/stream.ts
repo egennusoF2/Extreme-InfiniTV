@@ -4,6 +4,7 @@ import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   loadCreds,
   getActiveEntry,
+  getEntries,
   fmtBase,
   safeHttpUrl,
   isLikelyM3USource,
@@ -35,6 +36,7 @@ import { toast, toastError } from "@/scripts/lib/toast.js"
 import {
   mountPlayer,
   externalPlayersAvailable,
+  androidExternalAvailable,
   getExternalLauncher,
 } from "@/scripts/lib/player-runtime.ts"
 import {
@@ -160,8 +162,30 @@ let activePlaylistId = ""
 let activePlaylistTitle = ""
 let activeTuningTransition: any = null
 
+// The inline script in livetv.astro sets data-first-run optimistically from
+// localStorage["xt_playlists"]. On Tauri builds the real entry list lives in
+// the plugin-store (.xtream.creds.json), so localStorage is empty and the
+// welcome card stays up over the actual channels. Reconcile against the
+// authoritative source whenever the page boots or the entry list changes.
+async function reconcileFirstRun() {
+  try {
+    const entries = await getEntries()
+    document.documentElement.toggleAttribute(
+      "data-first-run",
+      entries.length === 0
+    )
+  } catch (err) {
+    log.warn("[xt:livetv] reconcileFirstRun failed:", err)
+  }
+}
+
+document.addEventListener("xt:entries-updated", () => {
+  reconcileFirstRun()
+})
+
 document.addEventListener("xt:active-changed", () => {
   clearRichPresence().catch(() => {})
+  reconcileFirstRun()
   loadChannels()
 })
 
@@ -185,6 +209,7 @@ document.addEventListener("xt:channel-epg-changed", (e) => {
   ) {
     paintSidePanelFromXmltv(currentlyPlayingId)
   }
+  if (radioModeChannelId != null) paintRadioNowPlaying(radioModeChannelId)
 })
 
 document.addEventListener(EPG_LOADED_EVENT, (e) => {
@@ -196,6 +221,7 @@ document.addEventListener(EPG_LOADED_EVENT, (e) => {
   if (currentlyPlayingId && hasDirectUrl(currentlyPlayingId)) {
     paintSidePanelFromXmltv(currentlyPlayingId)
   }
+  if (radioModeChannelId != null) paintRadioNowPlaying(radioModeChannelId)
 })
 
 document.addEventListener(EPG_OFFSET_EVENT, (e) => {
@@ -257,18 +283,28 @@ const picker = mountCategoryPicker({
 })
 document.addEventListener("xt:cat-changed", () => scheduleApplyFilter())
 
+function computeRowH() {
+  if (typeof window === "undefined") return 68
+  const rootPx = parseFloat(
+    getComputedStyle(document.documentElement).fontSize || "16"
+  )
+  const base = Number.isFinite(rootPx) && rootPx > 0 ? rootPx : 16
+  return Math.max(56, Math.round(base * 4.25))
+}
+let ROW_H = computeRowH()
+
 function channelSkeletonCount() {
   // Fill the channel list pane regardless of viewport size.
   const containerH = listEl?.clientHeight || 0
   const fallback =
     typeof window !== "undefined" ? (window.innerHeight || 720) - 120 : 720
-  return Math.max(14, Math.ceil(Math.max(containerH, fallback) / 68) + 4)
+  return Math.max(14, Math.ceil(Math.max(containerH, fallback) / ROW_H) + 4)
 }
 
 function renderChannelSkeletons(count) {
   if (!viewport || !spacer) return
   const total = Number.isFinite(count) && count > 0 ? count : channelSkeletonCount()
-  spacer.style.height = `${total * 68}px`
+  spacer.style.height = `${total * ROW_H}px`
   const frag = document.createDocumentFragment()
   // Vary widths so the placeholder looks like a list, not a striped pattern.
   const nameWidths = [62, 78, 54, 70, 86, 60, 72, 50, 80, 64, 76, 58]
@@ -280,7 +316,7 @@ function renderChannelSkeletons(count) {
 
     const row = document.createElement("div")
     row.className = "channel-row flex w-full items-center gap-1"
-    row.style.height = "68px"
+    row.style.height = `${ROW_H}px`
     row.dataset.idx = String(i)
     row.dataset.skeleton = "true"
     row.style.setProperty("--skel-enter-delay", `${enterDelay}ms`)
@@ -302,7 +338,6 @@ function renderChannelSkeletons(count) {
 /** @type {Map<string,string> | null} */
 let categoryMap = null
 
-const ROW_H = 68
 const OVERSCAN_DEFAULT = 6
 const OVERSCAN_PERF = 2
 const isPerfMode = () =>
@@ -1283,6 +1318,7 @@ const ensureEmbeddedPlayer = async (backend) => {
   if (mounted.backend === "videojs") {
     attachPlayerFocusKeeper(vjs)
   }
+  attachAudioOnlyDetection(vjs)
 
   vjs.on("playing", () => {
     hideTuningOverlay()
@@ -1334,6 +1370,98 @@ const ensureEmbeddedPlayer = async (backend) => {
   })
 
   return vjs
+}
+
+/** Channel ID currently rendered in radio mode (-1 = none). */
+let radioModeChannelId: number | null = null
+
+function getPlayerWrap(): HTMLElement | null {
+  return document.getElementById("player-wrap")
+}
+
+function setRadioMode(channel: { id: number; name?: string; logo?: string | null }) {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  wrap.dataset.radioMode = "on"
+  const nameEl = wrap.querySelector<HTMLElement>("[data-radio-name]")
+  if (nameEl) nameEl.textContent = channel.name || `Channel ${channel.id}`
+  const cover = wrap.querySelector<HTMLImageElement>("[data-radio-cover]")
+  if (cover) {
+    cover.dataset.loaded = "false"
+    const logoUrl = channel.logo ? safeHttpUrl(channel.logo) : null
+    if (logoUrl) {
+      cover.onload = () => { cover.dataset.loaded = "true" }
+      cover.onerror = () => { cover.dataset.loaded = "false" }
+      cover.src = logoUrl
+    } else {
+      cover.removeAttribute("src")
+    }
+  }
+  radioModeChannelId = channel.id
+  paintRadioNowPlaying(channel.id)
+  wrap.setAttribute("aria-label", t("livetv.radioAriaLabel", { name: channel.name || "" }) || `Radio: ${channel.name || ""}`)
+}
+
+function clearRadioMode() {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  delete wrap.dataset.radioMode
+  wrap.removeAttribute("aria-label")
+  const nowEl = wrap.querySelector<HTMLElement>("[data-radio-nowplaying]")
+  if (nowEl) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+  }
+  radioModeChannelId = null
+}
+
+function paintRadioNowPlaying(channelId: number) {
+  const wrap = getPlayerWrap()
+  if (!wrap) return
+  const nowEl = wrap.querySelector<HTMLElement>("[data-radio-nowplaying]")
+  if (!nowEl) return
+  const channel = all.find((entry) => entry.id === channelId)
+  if (!channel || !activePlaylistId) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  const tvgId = effectiveTvgId(channel, activePlaylistId)
+  if (!tvgId) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  const state = getProgrammesSync(activePlaylistId)
+  const { current } = getNowNext(state?.programmes, tvgId)
+  if (!current?.title) {
+    nowEl.textContent = ""
+    nowEl.hidden = true
+    return
+  }
+  nowEl.textContent = current.title
+  nowEl.hidden = false
+}
+
+/** Listen for the underlying <video> exposing zero video pixels - that's an
+ * audio-only stream, so promote the wrap to radio mode even when the M3U
+ * didn't carry a `tvg-type` hint. Hook this once after the player mounts. */
+function attachAudioOnlyDetection(handle: { on(event: string, fn: (...args: unknown[]) => void): void }) {
+  const detect = () => {
+    const ctx = lastPlayContext
+    if (!ctx) return
+    const wrap = getPlayerWrap()
+    if (!wrap) return
+    if (wrap.dataset.radioMode === "on") return
+    const videoEl = wrap.querySelector("video") as HTMLVideoElement | null
+    if (!videoEl) return
+    if (videoEl.videoWidth === 0 && videoEl.videoHeight === 0) {
+      const channel = all.find((entry) => entry.id === ctx.streamId)
+      if (channel) setRadioMode(channel)
+    }
+  }
+  handle.on("loadedmetadata", detect)
+  handle.on("playing", detect)
 }
 
 function showTuningOverlay(logoUrl) {
@@ -1604,6 +1732,11 @@ async function play(streamId, name) {
 
   resetEmptyState()
   document.getElementById("player")?.removeAttribute("hidden")
+  if (channel?.isRadio) {
+    setRadioMode({ id: streamId, name, logo: channel.logo ?? null })
+  } else {
+    clearRadioMode()
+  }
   const player = await ensureEmbeddedPlayer(backend)
   if (!player) return
   await applyStreamHeaders(channelHeaders)
@@ -1633,7 +1766,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
   liveExternalBtnHandle?.dispose()
   liveExternalBtnHandle = null
 
-  if (!parent || !externalPlayersAvailable) return
+  if (!parent || (!externalPlayersAvailable && !androidExternalAvailable)) return
 
   const btn = document.createElement("button")
   btn.id = "external-launch-btn"
@@ -1662,6 +1795,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
         referer: channelHeaders?.referer || null,
       }
     },
+    getTitle: () => name || null,
     beforeLaunch: () => {
       try { vjs?.pause?.() } catch {}
     },
@@ -1669,6 +1803,7 @@ function appendExternalLaunchButton(parent, streamId, src, name) {
 }
 
 function showExternalPlayerEmptyState(backend, channelName) {
+  clearRadioMode()
   const empty = document.getElementById("player-empty")
   if (!empty) return
   const eyebrow = empty.querySelector("[data-i18n='livetv.idle']") as HTMLElement | null
@@ -1912,6 +2047,24 @@ setInterval(() => {
   refreshNowSlots()
 }, 60 * 1000)
 
+// Window resize (incl. maximize) changes the 0.84vw root font-size and
+// therefore the visual height of channel-row content. Recompute the
+// virtualization unit and re-render so rows still match their content box.
+const handleRowHResize = debounce(() => {
+  const next = computeRowH()
+  if (next === ROW_H) return
+  ROW_H = next
+  if (spacer && filtered) {
+    spacer.style.height = `${filtered.length * ROW_H}px`
+  }
+  if (viewport?.querySelector("[data-skeleton]")) {
+    renderChannelSkeletons()
+  } else {
+    renderVirtual()
+  }
+}, 120)
+window.addEventListener("resize", handleRowHResize)
+
 // ----------------------------
 // Boot
 // ----------------------------
@@ -1927,6 +2080,7 @@ if (listStatus && /no playlist selected/i.test(listStatus.textContent || "")) {
 ;(async () => {
   log.log("[xt:livetv] boot start")
   await initI18n()
+  await reconcileFirstRun()
   creds = await loadCreds()
   log.log("[xt:livetv] boot creds host=", !!creds.host)
   if (creds.host) {

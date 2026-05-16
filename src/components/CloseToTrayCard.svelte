@@ -1,0 +1,78 @@
+<script>
+  // "Close button behavior" card - desktop Tauri only. Stays hidden on web
+  // and Android where the X is owned by the OS / browser. setCloseToTray()
+  // pushes the new value to the Rust side via a Tauri command so the
+  // window-event handler picks it up immediately.
+  import { onMount } from "svelte"
+  import { IconAppWindow } from "@tabler/icons-svelte"
+  import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
+  import {
+    getCloseToTray,
+    setCloseToTray,
+    CLOSE_TO_TRAY_EVENT,
+  } from "@/scripts/lib/app-settings.js"
+
+  let available = $state(false)
+  let closeToTray = $state(getCloseToTray())
+  let locale = $state(0)
+  const tr = (key) => (locale, t(key))
+
+  function pick(value) {
+    setCloseToTray(value)
+  }
+
+  onMount(() => {
+    available =
+      !!(window.__TAURI_INTERNALS__ || window.__TAURI__) &&
+      !/Android/i.test(navigator.userAgent || "")
+    const onChange = (event) => {
+      const next = event?.detail?.value
+      closeToTray = typeof next === "boolean" ? next : getCloseToTray()
+    }
+    const onLocale = () => { locale++ }
+    document.addEventListener(CLOSE_TO_TRAY_EVENT, onChange)
+    document.addEventListener(LOCALE_EVENT, onLocale)
+    return () => {
+      document.removeEventListener(CLOSE_TO_TRAY_EVENT, onChange)
+      document.removeEventListener(LOCALE_EVENT, onLocale)
+    }
+  })
+</script>
+
+{#if available}
+  <article
+    id="close-behavior-section"
+    class="icon-mark-host rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4 scroll-mt-6">
+    <div class="flex items-start gap-3">
+      <span class="icon-mark">
+        <IconAppWindow aria-hidden="true" stroke={2} />
+      </span>
+      <div class="flex flex-col gap-1 min-w-0">
+        <h3 class="text-base font-semibold">{tr("settings.closeBehavior.title")}</h3>
+        <p class="text-xs text-fg-3">{tr("settings.closeBehavior.helper")}</p>
+      </div>
+    </div>
+    <div class="flex flex-col gap-2">
+      <span class="text-eyebrow font-medium uppercase text-fg-3">{tr("settings.closeBehavior.label")}</span>
+      <div
+        class="grid grid-cols-2 gap-2"
+        role="radiogroup"
+        aria-label={tr("settings.closeBehavior.label")}>
+        <button
+          type="button"
+          class="btn"
+          aria-pressed={closeToTray ? "true" : "false"}
+          onclick={() => pick(true)}>
+          {tr("settings.closeBehavior.tray")}
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-pressed={!closeToTray ? "true" : "false"}
+          onclick={() => pick(false)}>
+          {tr("settings.closeBehavior.quit")}
+        </button>
+      </div>
+    </div>
+  </article>
+{/if}

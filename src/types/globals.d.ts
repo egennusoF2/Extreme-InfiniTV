@@ -6,6 +6,36 @@ interface AndroidPipBridge {
   exit?: () => void
 }
 
+interface AndroidIntentBridge {
+  isVlcInstalled?: () => boolean
+  isMxPlayerInstalled?: () => boolean
+  viewStream?: (
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+  openInVlc?: (
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+  /** Returns a JSON-encoded array of {pkg, label, activity}. */
+  listVideoPlayerApps?: (url: string, mime: string) => string
+  openInPackage?: (
+    pkg: string,
+    activity: string,
+    url: string,
+    mime: string,
+    userAgent: string,
+    referer: string,
+    title: string,
+  ) => boolean
+}
+
 interface SpatialNavigationApi {
   init: () => void
   uninit: () => void
@@ -29,6 +59,7 @@ declare global {
     __TAURI_INTERNALS__?: unknown
     SpatialNavigation?: SpatialNavigationApi
     AndroidPip?: AndroidPipBridge
+    AndroidIntent?: AndroidIntentBridge
   }
 }
 

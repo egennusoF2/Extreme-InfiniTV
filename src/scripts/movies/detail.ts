@@ -484,8 +484,10 @@ const externalBtnHandle = setupExternalPlayerButton(
       if (!saved || saved.completed) return 0
       return saved.position > RESUME_MIN_SECONDS ? saved.position : 0
     },
+    getTitle() {
+      return movie?.name || null
+    },
     beforeLaunch() {
-      // Pause Video.js (or HTML5) so we don't double up on audio.
       try { vjs?.pause?.() } catch {}
     },
   }
@@ -623,6 +625,12 @@ function applyDownloadState() {
 
 document.addEventListener(DOWNLOADS_LIST_EVENT, applyDownloadState)
 document.addEventListener(DOWNLOAD_PROGRESS_EVENT, applyDownloadState)
+
+// The poster-grid right-click menu can deep-link here with ?download=1 to
+// auto-kick the download flow
+if (urlParams.get("download") === "1") {
+  setTimeout(() => downloadBtn?.click(), 0)
+}
 
 downloadBtn?.addEventListener("click", async () => {
   if (!movie) return

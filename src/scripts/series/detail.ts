@@ -829,6 +829,15 @@ const externalBtnHandle = setupExternalPlayerButton(
       if (!saved || saved.completed) return 0
       return saved.position > RESUME_MIN_SECONDS ? saved.position : 0
     },
+    getTitle() {
+      if (!currentEpisode) return series?.name || null
+      const seasonNum = currentEpisode.season || currentSeason
+      const epNum = currentEpisode.episode_num
+      const episodeTitle = currentEpisode.title || ""
+      const seriesName = series?.name || ""
+      const sxe = seasonNum && epNum ? `S${seasonNum}E${epNum}` : ""
+      return [seriesName, sxe, episodeTitle].filter(Boolean).join(" · ") || null
+    },
     beforeLaunch() {
       try { vjs?.pause?.() } catch {}
     },

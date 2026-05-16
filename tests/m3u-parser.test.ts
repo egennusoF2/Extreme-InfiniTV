@@ -233,6 +233,59 @@ describe("parseM3U: HLS sub-playlist tags", () => {
   })
 })
 
+describe("parseM3U: radio detection", () => {
+  it("marks tvg-type=\"radio\" entries as radio", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-id="rb" tvg-type="radio" tvg-logo="https://example.com/rb.png",Radio Bremen\n' +
+      "http://example.com/rb.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].isRadio).toBe(true)
+    expect(result.entries[0].tvgType).toBe("radio")
+  })
+
+  it("marks radio=\"true\" entries as radio", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-id="x" radio="true",FM Station\n' +
+      "http://example.com/x.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].isRadio).toBe(true)
+  })
+
+  it("is case-insensitive on both flags", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-type="Radio",Mixed Case\n' +
+      "http://example.com/a.m3u8\n" +
+      '#EXTINF:-1 radio="TRUE",Caps True\n' +
+      "http://example.com/b.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].isRadio).toBe(true)
+    expect(result.entries[1].isRadio).toBe(true)
+  })
+
+  it("leaves regular tv entries as non-radio", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-id="x" tvg-type="tv",Regular TV\n' +
+      "http://example.com/x.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].isRadio).toBe(false)
+    expect(result.entries[0].tvgType).toBe("tv")
+  })
+
+  it("defaults isRadio=false and tvgType=null when neither attr is set", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-id="x",No Hint\n' +
+      "http://example.com/x.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].isRadio).toBe(false)
+    expect(result.entries[0].tvgType).toBeNull()
+  })
+})
+
 describe("parseM3U: malformed input resilience", () => {
   it("ignores a bare URL with no preceding #EXTINF", () => {
     const text =

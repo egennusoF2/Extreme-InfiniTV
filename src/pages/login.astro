@@ -112,12 +112,11 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 					<input
 						id="serverUrl"
 						type="text"
-						placeholder="http://example.com:8080"
+						placeholder="example.com:8080"
 						class="field-input"
 					/>
 					<span data-i18n="login.field.serverUrl.helper" class="text-xs text-fg-3 leading-relaxed">
-						Paste a full player_api.php URL to auto-fill the fields below, or enter just the
-						server URL and fill in username and password yourself.
+						Paste a full player_api.php URL to auto-fill the fields below, or enter just the hostname.
 					</span>
 				</label>
 
@@ -248,11 +247,11 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 					<input
 						id="m3uUrl"
 						type="text"
-						placeholder="https://example.com/playlist.m3u8"
+						placeholder="example.com/playlist.m3u8"
 						class="field-input"
 					/>
 					<span data-i18n="login.field.playlistUrl.helper" class="text-xs text-fg-3 leading-relaxed">
-						Any http(s) URL that serves an M3U playlist. Extensions optional.
+						Any URL that serves an M3U playlist. Extension and scheme optional.
 					</span>
 				</label>
 			</div>
@@ -418,6 +417,25 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 				class="hidden items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm leading-relaxed">
 			</div>
 
+			<!-- "Run full diagnostic" affordance + result panel. Hidden until the
+			     user has hit Test once; clicking the link runs the multi-step
+			     wizard in lib/diagnostic.ts and renders the step-by-step result. -->
+			<div id="diagnostic-affordance" class="hidden flex-col gap-2">
+				<button
+					id="diagnostic-run-btn"
+					type="button"
+					class="self-start inline-flex items-center gap-1.5 rounded-lg border border-line bg-bg px-3.5 py-2 min-h-10 text-xs text-fg-2
+						hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
+					<span data-i18n="diagnostic.runFull">Run full diagnostic</span>
+				</button>
+				<div
+					id="diagnostic-result"
+					class="hidden"
+					role="status"
+					aria-live="polite"
+					aria-atomic="false"></div>
+			</div>
+
 			<!-- Actions -->
 			<div
 				class="flex flex-wrap gap-2 pt-2 mt-2 border-t border-line">
@@ -454,8 +472,8 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 		updateEntry,
 		getEntries,
 		parseXtreamUrl,
-		testXtreamConnection,
-		testM3UUrl,
+		resolveServerScheme,
+		resolveM3UScheme,
 		LOCAL_M3U_SCHEME,
 		readLocalM3UContent,
 		isTauri,
@@ -492,6 +510,9 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	const localFileInput = $("localFileInput");
 	const localFileNameEl = $("localFileName");
 	const statusEl = $("status");
+	const diagnosticAffordance = $("diagnostic-affordance");
+	const diagnosticRunBtn = $("diagnostic-run-btn");
+	const diagnosticResultEl = $("diagnostic-result");
 	const testBtn = $("testBtn");
 	const saveBtn = $("saveBtn");
 	const pageTitle = $("page-title");
@@ -969,6 +990,11 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 		// after picking and surface the result via showStatus().
 		testBtn.classList.toggle("hidden", isL);
 		clearStatus();
+		hideDiagnosticResult();
+		if (diagnosticAffordance) {
+			diagnosticAffordance.classList.add("hidden");
+			diagnosticAffordance.classList.remove("flex");
+		}
 	}
 
 	function applyTabStyles(btn, active) {
@@ -1197,10 +1223,49 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 				return t("login.status.expired") + exp;
 			case "inactive":
 				return t("login.status.inactive") + exp;
-			default:
-				return t("login.status.serverUnreachable")
-					+ (result.message ? ` - ${result.message}` : ".")
-					+ privateHostHint(serverUrl);
+			default: {
+				// Map the structured reason from classifyError to actionable copy
+				const reasonKeyMap = {
+					unreachable: "login.status.unreachable",
+					timeout: "login.status.timeout",
+					cors: "login.status.corsBlocked",
+					auth_rejected: "login.status.badCredentials",
+					not_found: "login.status.notFound",
+					rate_limited: "login.status.rateLimited",
+					server_error: "login.status.httpError",
+					http_error: "login.status.httpError",
+					bad_response: "login.status.badResponseXtream",
+					unknown: "login.status.serverUnreachable",
+				};
+				const reasonKey = (result.reason && reasonKeyMap[result.reason]) || "login.status.serverUnreachable";
+				const params = result.httpStatus != null ? { status: String(result.httpStatus) } : {};
+				return t(reasonKey, params) + privateHostHint(serverUrl);
+			}
+		}
+	}
+
+	function describeResolvedCandidate(resolved) {
+		const base = describeCandidateResult(resolved.test, resolved.serverUrl);
+		if (!resolved.swapped) return base;
+		const noteKey = resolved.scheme === "http"
+			? "login.status.schemeSwappedHttp"
+			: "login.status.schemeSwappedHttps";
+		return base + " " + t(noteKey);
+	}
+
+	function reflectResolvedUrls(primaryResolved, mirrorResolveds) {
+		if (primaryResolved && serverEl.value.trim() !== primaryResolved.serverUrl) {
+			serverEl.value = primaryResolved.serverUrl;
+		}
+		const rows = mirrorsListEl?.querySelectorAll("[data-role='mirror-row']") || [];
+		let mirrorIdx = 0;
+		for (const row of rows) {
+			const serverInput = /** @type {HTMLInputElement} */ (row.querySelector("[data-role='mirror-server']"));
+			if (!serverInput || !serverInput.value.trim()) continue;
+			const resolved = mirrorResolveds[mirrorIdx++];
+			if (resolved && serverInput.value.trim() !== resolved.serverUrl) {
+				serverInput.value = resolved.serverUrl;
+			}
 		}
 	}
 
@@ -1234,15 +1299,17 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 					})),
 				];
 				showStatus("busy", t("login.status.testing"));
-				const results = await Promise.all(
+				const resolveds = await Promise.all(
 					candidates.map((cand) =>
-						testXtreamConnection({
+						resolveServerScheme({
 							serverUrl: cand.serverUrl,
 							username: cand.username,
 							password: cand.password,
 						})
 					)
 				);
+				reflectResolvedUrls(resolveds[0], resolveds.slice(1));
+				const results = resolveds.map((resolved) => resolved.test);
 
 				// Single-candidate path keeps the old single-line message.
 				if (candidates.length === 1) {
@@ -1252,7 +1319,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 							: result.status === "expired" ? "expired"
 							: result.status === "inactive" ? "inactive"
 							: "unavailable",
-						describeCandidateResult(result, candidates[0].serverUrl)
+						describeResolvedCandidate(resolveds[0])
 					);
 				} else {
 					// Aggregate verdict = best candidate. Body lists each.
@@ -1266,33 +1333,118 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 						}
 					}
 					const lines = candidates.map((cand, idx) =>
-						`${cand.label}: ${describeCandidateResult(results[idx], cand.serverUrl)}`
+						`${cand.label}: ${describeResolvedCandidate(resolveds[idx])}`
 					);
 					showStatus(bestStatus, lines.join("\n"));
 				}
 			} else {
-				const url = m3uEl.value.trim();
-				if (!url) {
+				const rawUrl = m3uEl.value.trim();
+				if (!rawUrl) {
 					showStatus("unavailable", t("login.status.enterM3uUrl"));
 					return;
 				}
 				showStatus("busy", t("login.status.fetching"));
-				const r = await testM3UUrl(url);
-				if (r.status === "active") {
-					const n = r.count || 0;
+				const resolved = await resolveM3UScheme(rawUrl);
+				if (m3uEl.value.trim() !== resolved.url) m3uEl.value = resolved.url;
+				const result = resolved.test;
+				if (result.status === "active") {
+					const count = result.count || 0;
+					const swap = resolved.swapped
+						? " " + t(resolved.scheme === "http" ? "login.status.schemeSwappedHttp" : "login.status.schemeSwappedHttps")
+						: "";
 					showStatus(
 						"active",
-						t("login.status.playlistOk") + (n ? t("login.status.playlistEntries", { count: n.toLocaleString() }) : ".")
+						t("login.status.playlistOk") + (count ? t("login.status.playlistEntries", { count: count.toLocaleString() }) : ".") + swap
 					);
 				} else {
-					showStatus(
-						"unavailable",
-						t("login.status.playlistFetchFailed") + (r.message ? ` - ${r.message}` : ".") + privateHostHint(url)
-					);
+					const reasonKeyMap = {
+						unreachable: "login.status.unreachable",
+						timeout: "login.status.timeout",
+						cors: "login.status.corsBlocked",
+						not_found: "login.status.notFound",
+						rate_limited: "login.status.rateLimited",
+						server_error: "login.status.httpError",
+						http_error: "login.status.httpError",
+						bad_response: "login.status.badResponseM3U",
+						unknown: "login.status.playlistFetchFailed",
+					};
+					const reasonKey = (result.reason && reasonKeyMap[result.reason]) || "login.status.playlistFetchFailed";
+					const params = result.httpStatus != null ? { status: String(result.httpStatus) } : {};
+					showStatus("unavailable", t(reasonKey, params) + privateHostHint(resolved.url));
 				}
 			}
+			// After any Test result (success or failure), reveal the "Run full
+			// diagnostic" affordance. Hidden for local-m3u since there's no
+			// remote to probe step-by-step.
+			if (mode !== "local-m3u") revealDiagnosticAffordance();
 		} finally {
 			testBtn.disabled = false;
+		}
+	});
+
+	// Progressive disclosure: simple Test result first, then optional full
+	// step-by-step diagnostic on demand. Hidden until the user runs Test at
+	// least once (so it doesn't compete with the primary action).
+	function revealDiagnosticAffordance() {
+		if (!diagnosticAffordance) return;
+		diagnosticAffordance.classList.remove("hidden");
+		diagnosticAffordance.classList.add("flex");
+	}
+
+	function hideDiagnosticResult() {
+		if (!diagnosticResultEl) return;
+		diagnosticResultEl.classList.add("hidden");
+		diagnosticResultEl.replaceChildren();
+	}
+
+	// Whenever the user edits any credential field, hide the previous
+	// diagnostic result - it's now stale.
+	for (const el of [serverEl, userEl, passEl, m3uEl]) {
+		el?.addEventListener("input", hideDiagnosticResult);
+	}
+
+	diagnosticRunBtn?.addEventListener("click", async () => {
+		if (!diagnosticResultEl) return;
+		diagnosticRunBtn.setAttribute("disabled", "");
+		diagnosticRunBtn.classList.add("opacity-60");
+		diagnosticResultEl.classList.remove("hidden");
+		diagnosticResultEl.className =
+			"flex flex-col gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-3 text-sm leading-relaxed text-fg-2";
+		diagnosticResultEl.textContent = t("diagnostic.running");
+		try {
+			const { runXtreamDiagnostic, runM3UDiagnostic, renderDiagnosticInto } = await import(
+				"@/scripts/lib/diagnostic.ts"
+			);
+			// Re-render the result panel each time a step completes. The Xtream
+			// wizard can take 5+ seconds end-to-end (vod + series catalogues
+			// can be slow), so users need to see rows appearing or they'll
+			// think the app is stuck.
+			const onProgress = (partialSteps) => {
+				renderDiagnosticInto(diagnosticResultEl, {
+					steps: partialSteps,
+					verdict: "running",
+					verdictMessage: t("diagnostic.running"),
+				});
+			};
+			let result;
+			if (mode === "xtream") {
+				result = await runXtreamDiagnostic({
+					serverUrl: serverEl.value.trim(),
+					username: userEl.value.trim(),
+					password: passEl.value.trim(),
+				}, { onProgress });
+			} else if (mode === "m3u") {
+				result = await runM3UDiagnostic(m3uEl.value.trim(), { onProgress });
+			} else {
+				diagnosticResultEl.classList.add("hidden");
+				return;
+			}
+			renderDiagnosticInto(diagnosticResultEl, result);
+		} catch (error) {
+			diagnosticResultEl.textContent = String(error?.message || error);
+		} finally {
+			diagnosticRunBtn.removeAttribute("disabled");
+			diagnosticRunBtn.classList.remove("opacity-60");
 		}
 	});
 
@@ -1318,24 +1470,34 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 					!!editing.disableProviderEpg !== disableProviderEpg);
 
 			if (mode === "xtream") {
-				const serverUrl = serverEl.value.trim();
+				const rawServerUrl = serverEl.value.trim();
 				const username = userEl.value.trim();
 				const password = passEl.value.trim();
-				if (!serverUrl || !username || !password) {
+				if (!rawServerUrl || !username || !password) {
 					showStatus(
 						"unavailable",
 						t("login.status.allRequired")
 					);
 					return;
 				}
-				if (!/^https?:\/\/[^\s]+$/i.test(serverUrl)) {
-					showStatus(
-						"unavailable",
-						t("login.status.serverUrlScheme")
-					);
-					return;
-				}
-				const mirrors = readMirrorsFromForm();
+				// Resolve scheme for primary + mirrors before persisting so the
+				// saved entry always has a usable http(s):// prefix and we don't
+				// re-probe on every API call.
+				showStatus("busy", t("login.status.testing"));
+				const rawMirrors = readMirrorsFromForm();
+				const allResolveds = await Promise.all([
+					resolveServerScheme({ serverUrl: rawServerUrl, username, password }),
+					...rawMirrors.map((mirror) => resolveServerScheme(mirror)),
+				]);
+				const primaryResolved = allResolveds[0];
+				const mirrorResolveds = allResolveds.slice(1);
+				reflectResolvedUrls(primaryResolved, mirrorResolveds);
+				const serverUrl = primaryResolved.serverUrl;
+				const mirrors = rawMirrors.map((mirror, idx) => ({
+					serverUrl: mirrorResolveds[idx].serverUrl,
+					username: mirror.username,
+					password: mirror.password,
+				}));
 				const liveContainer = liveContainerEl?.value === "ts" ? "ts" : "m3u8";
 				const patch = {
 					type: "xtream",
@@ -1356,18 +1518,21 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 					savedId = saved._id;
 				}
 			} else if (mode === "m3u") {
-				const url = m3uEl.value.trim();
-				if (!/^https?:\/\//i.test(url)) {
-					showStatus(
-						"unavailable",
-						t("login.status.m3uScheme")
-					);
+				const rawUrl = m3uEl.value.trim();
+				if (!rawUrl) {
+					showStatus("unavailable", t("login.status.enterM3uUrl"));
 					return;
 				}
+				// Same silent-fallback rule as Xtream: probe both schemes, save
+				// whichever the playlist actually serves under, fall back to the
+				// typed scheme (or http) when the provider is unreachable.
+				showStatus("busy", t("login.status.fetching"));
+				const resolvedM3U = await resolveM3UScheme(rawUrl);
+				if (m3uEl.value.trim() !== resolvedM3U.url) m3uEl.value = resolvedM3U.url;
 				const patch = {
 					type: "m3u",
 					title: titleEl.value.trim() || "",
-					url,
+					url: resolvedM3U.url,
 					epgUrl,
 					additionalEpgUrls,
 				};

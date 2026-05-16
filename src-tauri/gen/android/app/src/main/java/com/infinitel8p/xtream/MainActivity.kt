@@ -17,11 +17,19 @@ import android.util.Log
 import android.util.Rational
 import android.os.Build
 import android.webkit.JavascriptInterface
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.res.Configuration
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Base64
+import java.io.ByteArrayOutputStream
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -117,6 +125,321 @@ class DeviceInfoBridge(private val activity: TauriActivity) {
 
   @JavascriptInterface
   fun isTv(): Boolean = isLeanback() || isTelevisionUiMode()
+}
+
+// External-video-app handoff:
+//   viewStream(url, mime, ua, referer, title)
+//       -> Intent.ACTION_VIEW with createChooser() so the user picks the
+//          target app (MX Player / VLC / MPV-Android / Just Player / etc.).
+//   openInVlc(url, mime, ua, referer, title)
+//       -> Direct Intent.ACTION_VIEW pinned to org.videolan.vlc when
+//          installed; throws if not. UI should call isVlcInstalled() first.
+class IntentBridge(private val activity: TauriActivity) {
+  companion object {
+    private const val VLC_PACKAGE = "org.videolan.vlc"
+    private const val MX_PRO_PACKAGE = "com.mxtech.videoplayer.pro"
+    private const val MX_FREE_PACKAGE = "com.mxtech.videoplayer.ad"
+    private const val DEFAULT_MIME = "video/*"
+    private const val ICON_PX = 96
+    private val ALLOWED_SCHEMES = setOf("http", "https", "content", "file")
+  }
+
+  @JavascriptInterface
+  fun isVlcInstalled(): Boolean = isPackageInstalled(VLC_PACKAGE)
+
+  @JavascriptInterface
+  fun isMxPlayerInstalled(): Boolean =
+    isPackageInstalled(MX_PRO_PACKAGE) || isPackageInstalled(MX_FREE_PACKAGE)
+
+  /**
+   * Open via system chooser. Returns true synchronously when a handler
+   * exists; false when nothing on the device can play the URI. The
+   * startActivity call is dispatched fire-and-forget so the JS bridge
+   * thread never blocks waiting for the launch.
+   */
+  @JavascriptInterface
+  fun viewStream(
+    url: String?,
+    mime: String?,
+    userAgent: String?,
+    referer: String?,
+    title: String?,
+  ): Boolean {
+    val uri = parseUri(url) ?: return false
+    val intent = buildViewIntent(uri, mime, userAgent, referer, title)
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    val chooser = Intent.createChooser(
+      intent,
+      title?.takeIf { it.isNotBlank() } ?: "Open with"
+    )
+    dispatchStartActivity(chooser, "viewStream")
+    return true
+  }
+
+  /**
+   * Open directly in VLC. Returns true synchronously when VLC is installed
+   * and resolves the intent; false otherwise. UI should fall back to
+   * viewStream() or hide the button on false.
+   */
+  @JavascriptInterface
+  fun openInVlc(
+    url: String?,
+    mime: String?,
+    userAgent: String?,
+    referer: String?,
+    title: String?,
+  ): Boolean {
+    val uri = parseUri(url) ?: return false
+    if (!isPackageInstalled(VLC_PACKAGE)) return false
+    val intent = buildViewIntent(uri, mime, userAgent, referer, title).apply {
+      setPackage(VLC_PACKAGE)
+    }
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    dispatchStartActivity(intent, "openInVlc")
+    return true
+  }
+
+  /**
+   * Enumerate installed apps that can handle a VIEW intent for the given
+   * URI + MIME. Returns a compact JSON array of {pkg,label,activity}.
+   *
+   * We use this so the UI can present its own picker dialog and then
+   * launch via openInPackage(). Bypassing Android's createChooser()
+   * sidesteps a long-standing VLC-on-Android quirk: chooser-routed
+   * intents sometimes resolve to VLC's main UI / playback service
+   * instead of VideoPlayerActivity, which produces a "playing"
+   * notification but no actual video. Direct setPackage launch always
+   * resolves to the right activity.
+   */
+  @JavascriptInterface
+  fun listVideoPlayerApps(url: String?, mime: String?): String {
+    val uri = parseUri(url) ?: return "[]"
+    val resolvedMime = mime?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_MIME
+    val probe = Intent(Intent.ACTION_VIEW).apply {
+      setDataAndType(uri, resolvedMime)
+    }
+    val pm = activity.packageManager
+    val resolved: List<ResolveInfo> = try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.queryIntentActivities(probe, PackageManager.ResolveInfoFlags.of(0))
+      } else {
+        @Suppress("DEPRECATION")
+        pm.queryIntentActivities(probe, 0)
+      }
+    } catch (e: Throwable) {
+      Log.w("xtream-rs", "listVideoPlayerApps query failed: $e")
+      return "[]"
+    }
+    val selfPackage = activity.packageName
+    val seenPackages = HashSet<String>()
+    val entries = ArrayList<String>(resolved.size)
+    for (ri in resolved) {
+      val info = ri.activityInfo ?: continue
+      val pkg = info.packageName ?: continue
+      if (pkg == selfPackage) continue
+      if (!seenPackages.add(pkg)) continue
+      val label = try {
+        ri.loadLabel(pm)?.toString()?.takeIf { it.isNotBlank() } ?: pkg
+      } catch (e: Throwable) {
+        pkg
+      }
+      val activityName = info.name ?: ""
+      val iconDataUri = try {
+        encodeIconAsDataUri(ri.loadIcon(pm))
+      } catch (e: Throwable) {
+        Log.w("xtream-rs", "loadIcon for $pkg failed: $e")
+        ""
+      }
+      entries.add(
+        "{\"pkg\":\"${escapeJson(pkg)}\"," +
+          "\"label\":\"${escapeJson(label)}\"," +
+          "\"activity\":\"${escapeJson(activityName)}\"," +
+          "\"icon\":\"${escapeJson(iconDataUri)}\"}"
+      )
+    }
+    return "[${entries.joinToString(",")}]"
+  }
+
+  // Render the launcher Drawable into a fixed-size PNG and return a
+  // data: URI so the WebView can paint it directly. Adaptive icons
+  // (Android 8+ AdaptiveIconDrawable) draw correctly through the
+  // standard Drawable.draw() path - we don't need special handling.
+  private fun encodeIconAsDataUri(drawable: Drawable?): String {
+    if (drawable == null) return ""
+    val targetPx = ICON_PX
+    val bitmap = if (
+      drawable is BitmapDrawable &&
+      drawable.bitmap != null &&
+      !drawable.bitmap.isRecycled
+    ) {
+      Bitmap.createScaledBitmap(drawable.bitmap, targetPx, targetPx, true)
+    } else {
+      val intrinsicW = drawable.intrinsicWidth
+      val intrinsicH = drawable.intrinsicHeight
+      val w = if (intrinsicW > 0) intrinsicW.coerceAtMost(targetPx) else targetPx
+      val h = if (intrinsicH > 0) intrinsicH.coerceAtMost(targetPx) else targetPx
+      val out = Bitmap.createBitmap(targetPx, targetPx, Bitmap.Config.ARGB_8888)
+      val canvas = Canvas(out)
+      // Center the icon if its intrinsic aspect differs from the target.
+      val left = (targetPx - w) / 2
+      val top = (targetPx - h) / 2
+      drawable.setBounds(left, top, left + w, top + h)
+      drawable.draw(canvas)
+      out
+    }
+    return try {
+      val baos = ByteArrayOutputStream()
+      bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+      val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+      "data:image/png;base64,$base64"
+    } finally {
+      // Recycle only if we allocated; BitmapDrawable's source bitmap is
+      // owned by the system and the scaled copy is what we encoded.
+      try { bitmap.recycle() } catch (_: Throwable) {}
+    }
+  }
+
+  /**
+   * Launch a VIEW intent pinned to a specific package. Mirrors openInVlc
+   * but for any app the UI's custom picker selected.
+   *
+   * We DO NOT setComponent() even though we receive an activity name from
+   * the picker - setPackage() alone is essential. When both setPackage
+   * and setComponent are present the component takes precedence and
+   * Android skips intent-filter resolution inside the package. For VLC
+   * (https://wiki.videolan.org/Android_Player_Intents/) the right entry
+   * point is `org.videolan.vlc.gui.video.VideoPlayerActivity`, but
+   * queryIntentActivities can also return aliased / non-player matches
+   * (StartActivity, MainActivity, library entries) that fire VLC's
+   * playback notification without ever loading the URL. Letting Android
+   * pick the highest-priority match inside the package always lands us
+   * on the player activity. `activityName` stays in the signature for
+   * future / debug use.
+   */
+  @JavascriptInterface
+  fun openInPackage(
+    pkg: String?,
+    @Suppress("UNUSED_PARAMETER") activityName: String?,
+    url: String?,
+    mime: String?,
+    userAgent: String?,
+    referer: String?,
+    title: String?,
+  ): Boolean {
+    if (pkg.isNullOrBlank()) return false
+    val uri = parseUri(url) ?: return false
+    val intent = buildViewIntent(uri, mime, userAgent, referer, title).apply {
+      setPackage(pkg)
+    }
+    if (intent.resolveActivity(activity.packageManager) == null) return false
+    dispatchStartActivity(intent, "openInPackage($pkg)")
+    return true
+  }
+
+  private fun escapeJson(value: String): String {
+    val out = StringBuilder(value.length + 2)
+    for (ch in value) {
+      when {
+        ch == '\\' -> out.append("\\\\")
+        ch == '"' -> out.append("\\\"")
+        ch == '\n' -> out.append("\\n")
+        ch == '\r' -> out.append("\\r")
+        ch == '\t' -> out.append("\\t")
+        ch.code < 0x20 -> out.append(String.format("\\u%04x", ch.code))
+        else -> out.append(ch)
+      }
+    }
+    return out.toString()
+  }
+
+
+  private fun parseUri(url: String?): Uri? {
+    val trimmed = url?.trim().orEmpty()
+    if (trimmed.isEmpty()) return null
+    val parsed = try {
+      Uri.parse(trimmed)
+    } catch (e: Throwable) {
+      Log.w("xtream-rs", "IntentBridge.parseUri rejected '$trimmed': $e")
+      return null
+    }
+    val scheme = parsed.scheme?.lowercase()
+    if (scheme.isNullOrEmpty() || scheme !in ALLOWED_SCHEMES) {
+      Log.w("xtream-rs", "IntentBridge.parseUri rejected scheme '$scheme'")
+      return null
+    }
+    return parsed
+  }
+
+  private fun buildViewIntent(
+    uri: Uri,
+    mime: String?,
+    userAgent: String?,
+    referer: String?,
+    title: String?,
+  ): Intent {
+    val resolvedMime = mime?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_MIME
+    return Intent(Intent.ACTION_VIEW).apply {
+      setDataAndType(uri, resolvedMime)
+      // NEW_TASK on the target intent (not just on the chooser wrapper) so
+      // the player launches in its own task. Without this VLC misbehaves
+      // when chooser-routed - it inherits our app's task stack and the
+      // HLS open path silently fails. GRANT_READ_URI_PERMISSION matters
+      // for content:// URIs; harmless for http(s).
+      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+      val headerPairs = mutableListOf<String>()
+      if (!userAgent.isNullOrBlank()) {
+        headerPairs += "User-Agent"
+        headerPairs += userAgent
+        putExtra(":http-user-agent", userAgent)
+        putExtra("http-user-agent", userAgent)
+      }
+      if (!referer.isNullOrBlank()) {
+        headerPairs += "Referer"
+        headerPairs += referer
+        putExtra(":http-referrer", referer)
+      }
+      if (headerPairs.isNotEmpty()) {
+        putExtra("headers", headerPairs.toTypedArray())
+      }
+      if (!title.isNullOrBlank()) {
+        putExtra("title", title)
+        putExtra(Intent.EXTRA_TITLE, title)
+      }
+    }
+  }
+
+  private fun isPackageInstalled(pkg: String): Boolean {
+    return try {
+      val pm = activity.packageManager
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+      } else {
+        @Suppress("DEPRECATION")
+        pm.getPackageInfo(pkg, 0)
+      }
+      true
+    } catch (e: PackageManager.NameNotFoundException) {
+      false
+    } catch (e: Throwable) {
+      Log.w("xtream-rs", "isPackageInstalled($pkg) failed: $e")
+      false
+    }
+  }
+
+  // Fire-and-forget UI-thread launch
+  private fun dispatchStartActivity(intent: Intent, context: String) {
+    activity.runOnUiThread {
+      try {
+        activity.startActivity(intent)
+      } catch (e: ActivityNotFoundException) {
+        Log.w("xtream-rs", "$context startActivity threw: $e")
+      } catch (e: SecurityException) {
+        Log.w("xtream-rs", "$context blocked by SecurityException: $e")
+      } catch (e: Throwable) {
+        Log.w("xtream-rs", "$context launch threw: $e")
+      }
+    }
+  }
 }
 
 class PipBridge(private val activity: TauriActivity) {
@@ -282,6 +605,7 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(PipBridge(this), "AndroidPip")
     webView.addJavascriptInterface(StatusBarBridge(this), "AndroidStatusBar")
     webView.addJavascriptInterface(DeviceInfoBridge(this), "AndroidDeviceInfo")
+    webView.addJavascriptInterface(IntentBridge(this), "AndroidIntent")
     webView.addJavascriptInterface(
       WebSettingsBridge(this, { hostedWebView }, webView.settings.userAgentString),
       "AndroidWebSettings"

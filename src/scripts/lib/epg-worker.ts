@@ -31,10 +31,17 @@ function parseXmlTvDate(value: string): number {
   return sign === "+" ? utc - offsetMs : utc + offsetMs
 }
 
+function assertNoEntities(xml: string): void {
+  if (/<!DOCTYPE\b/i.test(xml) || /<!ENTITY\b/i.test(xml)) {
+    throw new Error("XMLTV contains forbidden DOCTYPE/ENTITY declaration")
+  }
+}
+
 function parseXmlTv(xml: string): {
   programmes: Map<string, Programme[]>
   channelNames: Map<string, string>
 } {
+  assertNoEntities(xml)
   const programmes = new Map<string, Programme[]>()
   const channelNames = new Map<string, string>()
   const doc = new DOMParser().parseFromString(xml, "text/xml")
@@ -95,6 +102,7 @@ function parseXmlTv(xml: string): {
 const post = (msg: ParseResponse) => (self as unknown as Worker).postMessage(msg)
 
 self.addEventListener("message", (event: MessageEvent<ParseRequest>) => {
+  if (event.origin && event.origin !== self.location.origin) return
   const { id, xml } = event.data || ({} as ParseRequest)
   if (typeof DOMParser === "undefined") {
     post({ id, fallback: true })

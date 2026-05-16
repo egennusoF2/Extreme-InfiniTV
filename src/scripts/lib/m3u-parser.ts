@@ -28,6 +28,8 @@ export interface M3UEntry {
   catchupDays: number | null
   userAgent: string | null
   referer: string | null
+  tvgType: string | null
+  isRadio: boolean
 }
 
 export interface M3UParseResult {
@@ -153,6 +155,11 @@ function parseExtinf(line: string): Omit<M3UEntry, "url"> {
   const chno = chnoRaw ? Number(chnoRaw) : NaN
   const catchupDaysRaw = readAttr(attrs, "catchup-days") || ""
   const catchupDays = catchupDaysRaw ? Number(catchupDaysRaw) : NaN
+  const tvgType = readAttr(attrs, "tvg-type") || null
+  const radioAttr = readAttr(attrs, "radio") || ""
+  const isRadio =
+    (tvgType ? tvgType.trim().toLowerCase() === "radio" : false) ||
+    radioAttr.trim().toLowerCase() === "true"
   return {
     name: finalName,
     logo: readAttr(attrs, "tvg-logo") || null,
@@ -165,6 +172,8 @@ function parseExtinf(line: string): Omit<M3UEntry, "url"> {
     catchupDays: Number.isFinite(catchupDays) ? catchupDays : null,
     userAgent: null,
     referer: null,
+    tvgType,
+    isRadio,
   }
 }
 

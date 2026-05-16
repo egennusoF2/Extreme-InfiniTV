@@ -522,6 +522,23 @@
     return elemList
   }
 
+  function isEditableTextTarget(target) {
+    if (!target || target.nodeType !== 1) return false
+    var tag = target.tagName
+    if (tag === "TEXTAREA") return true
+    if (tag === "INPUT") {
+      var type = (target.getAttribute("type") || "").toLowerCase()
+      return (
+        type === "" || type === "text" || type === "search" ||
+        type === "email" || type === "url" || type === "tel" ||
+        type === "password" || type === "number" || type === "date" ||
+        type === "datetime-local" || type === "month" || type === "time" ||
+        type === "week"
+      )
+    }
+    return target.isContentEditable === true
+  }
+
   function isNavigable(elem, sectionId, verifySectionSelector) {
     if (
       !elem ||
@@ -879,6 +896,13 @@
       evt.ctrlKey ||
       evt.metaKey ||
       evt.shiftKey
+    ) {
+      return
+    }
+
+    if (
+      (evt.keyCode === 37 || evt.keyCode === 39) &&
+      isEditableTextTarget(evt.target)
     ) {
       return
     }

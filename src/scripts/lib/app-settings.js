@@ -10,11 +10,50 @@ const KEY_PLAYER_ARGS_MPV = "xt_player_args_mpv"
 const KEY_PLAYER_ARGS_VLC = "xt_player_args_vlc"
 const KEY_PLAYER_REUSE_MPV = "xt_player_reuse_mpv"
 const KEY_PLAYER_REUSE_VLC = "xt_player_reuse_vlc"
+const KEY_CLOSE_TO_TRAY = "xt_close_to_tray"
+const KEY_HUB_STRIPS = "xt_hub_strips"
+const KEY_TV_OVERSCAN = "xt_tv_overscan"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
 export const PROGRESS_RETENTION_EVENT = "xt:progress-retention-changed"
 export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
+export const CLOSE_TO_TRAY_EVENT = "xt:close-to-tray-changed"
+export const HUB_STRIPS_EVENT = "xt:hub-strips-changed"
+export const TV_OVERSCAN_EVENT = "xt:tv-overscan-changed"
+export const TV_OVERSCAN_VALUES = [0, 2, 4, 6, 8]
+export const DEFAULT_TV_OVERSCAN = 0
+
+/**
+ * Catalog of every home-page strip the user can add. `kind` is the
+ * content filter the strip applies; `all` means cross-kind. Catalog ids
+ * are unique and stable across versions.
+ *
+ * @typedef {"continue-watching" | "favorites" | "watchlist" | "recently-added"} HubStripType
+ * @typedef {"all" | "live" | "vod" | "series"} HubStripKind
+ * @typedef {{ id: string, type: HubStripType, kind: HubStripKind }} HubStripDefinition
+ */
+/** @type {ReadonlyArray<HubStripDefinition>} */
+export const HUB_STRIP_CATALOG = Object.freeze([
+  { id: "continue-watching",     type: "continue-watching", kind: "all"    },
+  { id: "favorites",             type: "favorites",         kind: "all"    },
+  { id: "favorites:live",        type: "favorites",         kind: "live"   },
+  { id: "favorites:vod",         type: "favorites",         kind: "vod"    },
+  { id: "favorites:series",      type: "favorites",         kind: "series" },
+  { id: "watchlist",             type: "watchlist",         kind: "all"    },
+  { id: "watchlist:vod",         type: "watchlist",         kind: "vod"    },
+  { id: "watchlist:series",      type: "watchlist",         kind: "series" },
+  { id: "recently-added",        type: "recently-added",    kind: "all"    },
+  { id: "recently-added:vod",    type: "recently-added",    kind: "vod"    },
+  { id: "recently-added:series", type: "recently-added",    kind: "series" },
+])
+
+export const DEFAULT_HUB_STRIPS = Object.freeze([
+  "continue-watching",
+  "favorites",
+  "watchlist",
+  "recently-added",
+])
 export const PROGRESS_RETENTION_VALUES = [30, 90, 180, 0]
 export const DEFAULT_PROGRESS_RETENTION_DAYS = 90
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 1
@@ -124,6 +163,173 @@ export function setPerfMode(on) {
       new CustomEvent(PERF_MODE_EVENT, { detail: { value: !!on } })
     )
   }
+}
+
+// TV safe-area inset
+export function getTvOverscan() {
+  const raw = readLS(KEY_TV_OVERSCAN, "")
+  const parsed = parseFloat(raw)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 8) {
+    return DEFAULT_TV_OVERSCAN
+  }
+  return parsed
+}
+
+export function setTvOverscan(percent) {
+  let next = Number(percent)
+  if (!Number.isFinite(next) || next < 0) next = 0
+  if (next > 8) next = 8
+  try {
+    localStorage.setItem(KEY_TV_OVERSCAN, String(next))
+  } catch {}
+  if (typeof document !== "undefined") {
+    const root = document.documentElement
+    if (next > 0) {
+      root.style.setProperty("--xt-tv-overscan", String(next))
+      root.setAttribute("data-tv-overscan", "")
+    } else {
+      root.style.removeProperty("--xt-tv-overscan")
+      root.removeAttribute("data-tv-overscan")
+    }
+    document.dispatchEvent(
+      new CustomEvent(TV_OVERSCAN_EVENT, { detail: { value: next } })
+    )
+  }
+}
+
+// Close-button behavior on desktop. When true (default), the X button hides
+// the window to the system tray (Skype/Discord/Slack style); when false, X
+// fully quits. Desktop-only - on web and Android the X is provided by the
+// OS/browser and Tauri's close-to-tray plumbing doesn't run.
+//
+// Stored as "0" for opt-out so the default ("" / missing) keeps the
+// historical behavior on existing installs. The Rust side defaults to true
+// on launch and is corrected by `syncCloseToTrayToBackend()` once the
+// frontend boots - they only diverge for the few hundred milliseconds
+// before the layout script runs.
+export function getCloseToTray() {
+  return readLS(KEY_CLOSE_TO_TRAY, "") !== "0"
+}
+
+async function pushCloseToTrayToBackend(enabled) {
+  try {
+    if (typeof window === "undefined") return
+    const isTauriRuntime =
+      !!window.__TAURI_INTERNALS__ || !!window.__TAURI__
+    if (!isTauriRuntime) return
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) || ""
+    if (/Android/i.test(ua)) return
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("set_close_to_tray", { enabled: !!enabled })
+  } catch {}
+}
+
+export function setCloseToTray(on) {
+  writeLS(KEY_CLOSE_TO_TRAY, on ? "" : "0")
+  document.dispatchEvent(
+    new CustomEvent(CLOSE_TO_TRAY_EVENT, { detail: { value: !!on } })
+  )
+  pushCloseToTrayToBackend(!!on)
+}
+
+export function syncCloseToTrayToBackend() {
+  pushCloseToTrayToBackend(getCloseToTray())
+}
+
+const CATALOG_ID_SET = new Set(HUB_STRIP_CATALOG.map((entry) => entry.id))
+
+function sanitizeHubStripIds(rawIds) {
+  if (!Array.isArray(rawIds)) return null
+  const seen = new Set()
+  const out = []
+  for (const value of rawIds) {
+    if (typeof value !== "string") continue
+    if (!CATALOG_ID_SET.has(value)) continue
+    if (seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+  }
+  return out
+}
+
+/**
+ * Active home-page strips in order. Falls back to defaults on first run
+ * or if the saved value is corrupted. Always returns at least an empty
+ * array (never null).
+ *
+ * @returns {string[]}
+ */
+export function getHubStripIds() {
+  const raw = readLS(KEY_HUB_STRIPS, "")
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      const cleaned = sanitizeHubStripIds(parsed)
+      if (cleaned) return cleaned
+    } catch {}
+  }
+  return [...DEFAULT_HUB_STRIPS]
+}
+
+/**
+ * @returns {HubStripDefinition[]}
+ */
+export function getHubStrips() {
+  const ids = getHubStripIds()
+  const byId = new Map(HUB_STRIP_CATALOG.map((entry) => [entry.id, entry]))
+  return ids
+    .map((id) => byId.get(id))
+    .filter(/** @type {(x: HubStripDefinition | undefined) => x is HubStripDefinition} */ (Boolean))
+}
+
+function emitHubStripsChanged(ids) {
+  document.dispatchEvent(
+    new CustomEvent(HUB_STRIPS_EVENT, { detail: { ids } }),
+  )
+}
+
+export function setHubStripIds(ids) {
+  const cleaned = sanitizeHubStripIds(ids) || [...DEFAULT_HUB_STRIPS]
+  writeLS(KEY_HUB_STRIPS, JSON.stringify(cleaned))
+  emitHubStripsChanged(cleaned)
+}
+
+/**
+ * Move a strip by `delta` positions. Returns the new id order, or null
+ * if nothing changed (out of bounds or unknown id).
+ */
+export function moveHubStrip(id, delta) {
+  const current = getHubStripIds()
+  const idx = current.indexOf(id)
+  if (idx < 0) return null
+  const target = idx + delta
+  if (target < 0 || target >= current.length) return null
+  const next = current.slice()
+  const [moved] = next.splice(idx, 1)
+  next.splice(target, 0, moved)
+  setHubStripIds(next)
+  return next
+}
+
+export function addHubStrip(id) {
+  if (!CATALOG_ID_SET.has(id)) return null
+  const current = getHubStripIds()
+  if (current.includes(id)) return current
+  const next = [...current, id]
+  setHubStripIds(next)
+  return next
+}
+
+export function removeHubStrip(id) {
+  const current = getHubStripIds()
+  if (!current.includes(id)) return current
+  const next = current.filter((entry) => entry !== id)
+  setHubStripIds(next)
+  return next
+}
+
+export function resetHubStrips() {
+  setHubStripIds([...DEFAULT_HUB_STRIPS])
 }
 
 // Continue Watching retention
