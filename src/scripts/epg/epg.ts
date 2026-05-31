@@ -29,6 +29,7 @@ import {
   CHANNEL_EPG_CHANGED_EVENT,
 } from "@/scripts/lib/preferences.js"
 import { mountCategoryPicker } from "@/scripts/lib/category-picker.ts"
+import { canReplayProgramme } from "@/scripts/lib/catchup.ts"
 
 const CAT_FAVORITES = "__favorites__"
 const CAT_RECENTS = "__recents__"
@@ -38,6 +39,15 @@ const HOURS_VISIBLE = 6
 const ROW_HEIGHT = 64
 const CHANNEL_COL_WIDTH = 240
 const MAX_CHANNELS = 150
+const SHORT_EPG_FALLBACK_LIMIT = 80
+
+function hasCatchupMetadata(data) {
+  return Array.isArray(data) && data.some((channel) =>
+    Object.prototype.hasOwnProperty.call(channel, "catchup") ||
+    Object.prototype.hasOwnProperty.call(channel, "catchupDays") ||
+    Object.prototype.hasOwnProperty.call(channel, "catchupSource")
+  )
+}
 
 // ----------------------------
 // UI refs
@@ -64,6 +74,7 @@ let allChannels = []
 /** @type {Map<string, Array<{start:number,stop:number,title:string,desc:string}>>} channel id (tvg-id, lower-cased) → sorted programmes */
 const programmes = new Map()
 let viewStart = 0
+let useStreamIdProgrammeKeys = false
 
 const picker = mountCategoryPicker({
   kind: "epg",
@@ -219,7 +230,7 @@ function renderEpgSkeletonInto(target, label) {
   }
   root.appendChild(body)
 
-  // Now-line accent - quiet fuchsia hint about a third in.
+  // Now-line accent - quiet blue/cyan hint about a third in.
   const now = document.createElement("div")
   now.className = "epg-sk-now"
   now.style.left = `${CHANNEL_W + HOUR_W * 1.8}px`
@@ -267,6 +278,13 @@ function fmtTime(ts) {
 
 function timeToX(ts) {
   return ((ts - viewStart) / (60 * 60 * 1000)) * PX_PER_HOUR
+}
+
+function programmeKeyFor(channel) {
+  if (useStreamIdProgrammeKeys) return `stream:${channel.id}`
+  const tvgId = effectiveTvgId(channel, activePlaylistId)
+  if (tvgId) return tvgId
+  return ""
 }
 
 function renderTimeHeader() {
@@ -373,6 +391,7 @@ function renderChannelRow(channel, programmesForRow) {
     const right = Math.min(timeToX(p.stop), HOURS_VISIBLE * PX_PER_HOUR)
     const width = Math.max(2, right - left)
     const isLive = p.start <= Date.now() && p.stop > Date.now()
+    const isReplayable = canReplayProgramme(channel, p)
 
     const cell = document.createElement("button")
     cell.type = "button"
@@ -382,6 +401,8 @@ function renderChannelRow(channel, programmesForRow) {
       "active:scale-[0.97] " +
       (isLive
         ? "border-accent bg-accent-soft text-fg hover:bg-accent/20 focus-visible:bg-accent/20"
+        : isReplayable
+        ? "border-accent/50 bg-accent-soft text-fg hover:bg-accent/20 focus-visible:bg-accent/20"
         : "border-line bg-surface text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg") +
       " focus-visible:ring-2 focus-visible:ring-accent"
     cell.style.left = `${left}px`
@@ -395,6 +416,7 @@ function renderChannelRow(channel, programmesForRow) {
         stop: p.stop,
         channelName: channel.name,
         channelId: channel.id,
+        canReplay: isReplayable,
       })
     })
 
@@ -403,7 +425,7 @@ function renderChannelRow(channel, programmesForRow) {
     titleLine.textContent = p.title
     const timeLine = document.createElement("div")
     timeLine.className = "truncate text-2xs text-fg-3 tabular-nums"
-    timeLine.textContent = `${fmtTime(p.start)}–${fmtTime(p.stop)}`
+    timeLine.textContent = `${fmtTime(p.start)}–${fmtTime(p.stop)}${isReplayable ? " · REC" : ""}`
     cell.append(titleLine, timeLine)
 
     track.appendChild(cell)
@@ -472,7 +494,7 @@ function renderVirtualWindow() {
   for (let idx = startIdx; idx < endIdx; idx++) {
     if (renderedRows.has(idx)) continue
     const channel = channels[idx]
-    const key = effectiveTvgId(channel, activePlaylistId)
+    const key = programmeKeyFor(channel)
     const list = key ? programmes.get(key) || [] : []
     const row = renderChannelRow(channel, list)
     row.style.position = "absolute"
@@ -662,6 +684,15 @@ function render() {
 // Loaders
 // ----------------------------
 function pickChannels(cachedChannels) {
+  const filtered = pickChannelsByCategory(cachedChannels)
+  const withEpg = filtered.filter((channel) => {
+    const key = programmeKeyFor(channel)
+    return !!key && programmes.has(key)
+  })
+  return withEpg.slice(0, MAX_CHANNELS)
+}
+
+function pickChannelsByCategory(cachedChannels) {
   const activeCat = picker.getActiveCat()
   let filtered
   if (activeCat === CAT_FAVORITES && activePlaylistId) {
@@ -684,13 +715,7 @@ function pickChannels(cachedChannels) {
       picker.categoryPassesFilter((channel.category || "").toString())
     )
   }
-  // Drop channels with no resolvable tvg-id - they have no EPG match. A
-  // user-supplied per-channel override (Jellyfin-style) counts as resolvable
-  // even when channel.tvgId is empty.
-  const withEpg = filtered.filter((channel) =>
-    !!effectiveTvgId(channel, activePlaylistId)
-  )
-  return withEpg.slice(0, MAX_CHANNELS)
+  return filtered
 }
 
 async function fetchXtreamChannels() {
@@ -743,12 +768,96 @@ async function fetchXtreamChannels() {
         category,
         logo: ch.stream_icon || null,
         tvgId: String(ch.epg_channel_id || "") || undefined,
+        catchup: Number(ch.tv_archive) ? "xtream" : null,
+        catchupDays: Number(ch.tv_archive_duration) || null,
       }
     })
     .filter((x) => x.id && x.name)
     .sort((a, b) =>
       a.name.localeCompare(b.name, "en", { sensitivity: "base" })
     )
+}
+
+function decodeMaybeB64(value) {
+  if (!value) return ""
+  const text = String(value)
+  try {
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(text) && text.length % 4 === 0) {
+      const decoded = atob(text)
+      return decodeURIComponent(
+        Array.from(decoded)
+          .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`)
+          .join("")
+      )
+    }
+  } catch {}
+  return text
+}
+
+function parseXtreamProgrammeTime(value) {
+  if (value == null || value === "") return NaN
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric < 10_000_000_000 ? numeric * 1000 : numeric
+  }
+  const text = String(value).trim()
+  const normalised = text.includes("T") ? text : text.replace(" ", "T")
+  const parsed = Date.parse(normalised)
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+async function fetchShortEpgItems(channelId) {
+  const actions = ["get_short_epg", "get_simple_data_table"]
+  for (const action of actions) {
+    try {
+      const r = await xtreamApiFetch(action, {
+        stream_id: String(channelId),
+        limit: "16",
+      })
+      if (!r.ok) continue
+      const data = await r.json().catch(() => null)
+      const items = Array.isArray(data?.epg_listings)
+        ? data.epg_listings
+        : Array.isArray(data)
+        ? data
+        : []
+      if (items.length) return items
+    } catch (error) {
+      log.warn(`[epg] ${action} fallback failed for stream ${channelId}:`, error)
+    }
+  }
+  return []
+}
+
+async function loadShortEpgFallback(sourceChannels) {
+  const selected = pickChannelsByCategory(sourceChannels).slice(0, SHORT_EPG_FALLBACK_LIMIT)
+  if (!selected.length) return false
+
+  const results = await Promise.allSettled(
+    selected.map(async (channel) => {
+      const items = await fetchShortEpgItems(channel.id)
+      const list = items
+        .map((it) => ({
+          start: parseXtreamProgrammeTime(it.start_timestamp || it.start),
+          stop: parseXtreamProgrammeTime(it.stop_timestamp || it.end),
+          title: decodeMaybeB64(it.title || it.title_raw || t("programme.untitled")),
+          desc: decodeMaybeB64(it.description || it.description_raw || ""),
+        }))
+        .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.stop) && p.stop > p.start)
+      return { channel, list }
+    })
+  )
+
+  let loaded = 0
+  useStreamIdProgrammeKeys = true
+  for (const result of results) {
+    if (result.status !== "fulfilled") continue
+    const { channel, list } = result.value
+    if (!list.length) continue
+    programmes.set(`stream:${channel.id}`, list)
+    loaded++
+  }
+  return loaded > 0
 }
 
 // ----------------------------
@@ -838,20 +947,25 @@ async function init() {
   let cached =
     getCached(activePlaylistId, isM3U ? "m3u" : "live")?.data || null
 
-  if (!cached?.length) {
+  const needsCatchupRefresh = !!(cached?.length && !isM3U && !hasCatchupMetadata(cached))
+  if (!cached?.length || needsCatchupRefresh) {
     if (isM3U) {
       showStatus(
         t("epg.openLivetvFirst")
       )
       return
     }
-    showLoadingSkeleton(t("epg.loadingChannels"))
+    if (!cached?.length) showLoadingSkeleton(t("epg.loadingChannels"))
     try {
       cached = await fetchXtreamChannels()
     } catch (e) {
       log.error("[epg] channel re-fetch failed:", e)
-      showProviderError("channels")
-      return
+      if (cached?.length && needsCatchupRefresh) {
+        log.warn("[epg] using cached channels without catchup metadata")
+      } else {
+        showProviderError("channels")
+        return
+      }
     }
   }
 
@@ -861,19 +975,38 @@ async function init() {
   viewStart = roundHalfHourFloor(Date.now() - 30 * 60 * 1000)
   showLoadingSkeleton(t("epg.loadingFull"))
   programmes.clear()
+  useStreamIdProgrammeKeys = false
+  const canUseShortEpgFallback = !!(creds.user && creds.pass)
   try {
     const state = await loadProgrammes(activePlaylistId, creds, { force: true })
     if (!state) throw new Error("EPG fetch failed")
     for (const [k, v] of state.programmes) programmes.set(k, v)
   } catch (e) {
     log.error("[epg] load failed:", e)
-    showProviderError("EPG")
-    return
+    if (canUseShortEpgFallback) {
+      showLoadingSkeleton(t("epg.loadingChannels"))
+      const ok = await loadShortEpgFallback(cached)
+      if (!ok) {
+        showProviderError("EPG")
+        return
+      }
+    } else {
+      showProviderError("EPG")
+      return
+    }
   }
 
   if (!programmes.size) {
-    showStatus(t("epg.noProgrammesMatched"))
-    return
+    if (canUseShortEpgFallback) {
+      const ok = await loadShortEpgFallback(cached)
+      if (!ok) {
+        showStatus(t("epg.noProgrammesMatched"))
+        return
+      }
+    } else {
+      showStatus(t("epg.noProgrammesMatched"))
+      return
+    }
   }
 
   channels = pickChannels(cached)

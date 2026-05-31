@@ -20,10 +20,10 @@
   --color-fg-2: light-dark(oklch(0.4  0.013 255), oklch(0.78 0.011 250));
   --color-fg-3: light-dark(oklch(0.46 0.013 255), oklch(0.66 0.011 250));
 
-  /* accent: soft fuchsia, used sparingly. Light value tuned to pass AA on body text. */
-  --color-accent:      light-dark(oklch(0.46 0.19 330), oklch(0.78 0.13 330));
-  --color-accent-soft: light-dark(oklch(0.46 0.19 330 / 0.08), oklch(0.78 0.13 330 / 0.14));
-  --color-accent-ring: light-dark(oklch(0.46 0.19 330 / 0.32), oklch(0.78 0.13 330 / 0.32));
+  /* accent: soft blue/cyan, used sparingly. Light value tuned to pass AA on body text. */
+  --color-accent:      light-dark(oklch(0.46 0.17 235), oklch(0.78 0.12 225));
+  --color-accent-soft: light-dark(oklch(0.46 0.17 235 / 0.08), oklch(0.78 0.12 225 / 0.14));
+  --color-accent-ring: light-dark(oklch(0.46 0.17 235 / 0.32), oklch(0.78 0.12 225 / 0.32));
 
   /* semantic states. Light values deep enough to read as text on near-white (AA). */
   --color-ok:        light-dark(oklch(0.42 0.11 160), oklch(0.79 0.11 160));

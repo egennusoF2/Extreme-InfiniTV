@@ -647,23 +647,40 @@ async function fetchAndParseSource(playlistId, src, httpMeta) {
   const hash = urlHash(src.url)
   const kind = cacheKindFor(src.url)
 
-  const result = await retryWithBackoff(() =>
-    fetchEpgConditional(src.url, httpMeta[hash])
-  )
-
-  if (result.notModified) {
+  const cachedParsed = async () => {
     await cacheHydrate(playlistId, kind)
     const hit = cacheGet(playlistId, kind)
-    if (hit?.data?.entries) {
-      const programmes = new Map(hit.data.entries)
-      const channelNames = new Map(hit.data.channelNames || [])
-      return {
-        programmes,
-        channelNames,
-        count: countProgrammes(programmes),
-        cached: true,
-      }
+    if (!hit?.data?.entries) return null
+    const programmes = new Map(hit.data.entries)
+    const channelNames = new Map(hit.data.channelNames || [])
+    return {
+      programmes,
+      channelNames,
+      count: countProgrammes(programmes),
+      cached: true,
     }
+  }
+
+  let result
+  try {
+    result = await retryWithBackoff(() =>
+      fetchEpgConditional(src.url, httpMeta[hash])
+    )
+  } catch (error) {
+    const cached = await cachedParsed()
+    if (cached) {
+      log.warn(
+        `[xt:epg-data] source refresh failed, using cached parsed EPG (${src.source}):`,
+        error?.message || error
+      )
+      return cached
+    }
+    throw error
+  }
+
+  if (result.notModified) {
+    const cached = await cachedParsed()
+    if (cached) return cached
     // 304 but no cached parsed payload survived (TTL expired, IDB pruned).
     // Drop the stale validator and force a fresh fetch.
     delete httpMeta[hash]

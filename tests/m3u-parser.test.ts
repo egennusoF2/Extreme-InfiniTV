@@ -198,8 +198,19 @@ describe("parseM3U: catchup attributes", () => {
     const [first, second] = result.entries
     expect(first.catchup).toBe("append")
     expect(first.catchupDays).toBe(7)
+    expect(first.catchupSource).toBeNull()
     expect(second.catchup).toBe("default")
     expect(second.catchupDays).toBeNull()
+  })
+
+  it("captures catchup-source and timeshift day aliases", () => {
+    const text =
+      "#EXTM3U\n" +
+      '#EXTINF:-1 tvg-id="x" catchup="default" catchup-source="http://example.com/replay/${start}/${duration}" timeshift-days="3",Replay\n' +
+      "http://example.com/live/x.m3u8\n"
+    const result = parseM3U(text)
+    expect(result.entries[0].catchupSource).toBe("http://example.com/replay/${start}/${duration}")
+    expect(result.entries[0].catchupDays).toBe(3)
   })
 })
 

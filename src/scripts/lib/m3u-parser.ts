@@ -26,6 +26,7 @@ export interface M3UEntry {
   chno: number | null
   catchup: string | null
   catchupDays: number | null
+  catchupSource: string | null
   userAgent: string | null
   referer: string | null
   tvgType: string | null
@@ -153,7 +154,11 @@ function parseExtinf(line: string): Omit<M3UEntry, "url"> {
   const chnoRaw =
     readAttr(attrs, "tvg-chno") || readAttr(attrs, "channel-number") || ""
   const chno = chnoRaw ? Number(chnoRaw) : NaN
-  const catchupDaysRaw = readAttr(attrs, "catchup-days") || ""
+  const catchupDaysRaw =
+    readAttr(attrs, "catchup-days") ||
+    readAttr(attrs, "timeshift-days") ||
+    readAttr(attrs, "timeshift") ||
+    ""
   const catchupDays = catchupDaysRaw ? Number(catchupDaysRaw) : NaN
   const tvgType = readAttr(attrs, "tvg-type") || null
   const radioAttr = readAttr(attrs, "radio") || ""
@@ -168,8 +173,9 @@ function parseExtinf(line: string): Omit<M3UEntry, "url"> {
       readAttr(attrs, "tvg-id") || readAttr(attrs, "channel-id") || null,
     tvgName,
     chno: Number.isFinite(chno) ? chno : null,
-    catchup: readAttr(attrs, "catchup") || null,
+    catchup: readAttr(attrs, "catchup") || readAttr(attrs, "timeshift") || null,
     catchupDays: Number.isFinite(catchupDays) ? catchupDays : null,
+    catchupSource: readAttr(attrs, "catchup-source") || null,
     userAgent: null,
     referer: null,
     tvgType,

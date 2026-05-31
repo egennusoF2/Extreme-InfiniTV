@@ -74,7 +74,7 @@ html.xt-theme-switching::view-transition-new(root) {
     }
 }
 
-/* Theme tokens - slate foundation + soft fuchsia accent.*/
+/* Theme tokens - slate foundation + soft blue/cyan accent.*/
 :root {
     color-scheme: light dark;
 }
@@ -99,9 +99,9 @@ html.xt-theme-switching::view-transition-new(root) {
     --color-fg-2: light-dark(oklch(0.4   0.013 255), oklch(0.78  0.011 250));
     --color-fg-3: light-dark(oklch(0.48  0.012 255), oklch(0.6   0.011 250));
 
-    /* - accent: a single soft fuchsia - */
-    --color-accent:      light-dark(oklch(0.50 0.20 330), oklch(0.78 0.15 330));
-    --color-accent-soft: light-dark(oklch(0.50 0.20 330 / 0.12), oklch(0.78 0.15 330 / 0.18));
+    /* - accent: a single soft blue/cyan - */
+    --color-accent:      light-dark(oklch(0.52 0.17 235), oklch(0.78 0.13 225));
+    --color-accent-soft: light-dark(oklch(0.52 0.17 235 / 0.12), oklch(0.78 0.13 225 / 0.18));
 
     /* - semantic states - */
     --color-ok:   light-dark(oklch(0.5  0.12 160), oklch(0.79 0.13 160));
@@ -2466,4 +2466,3 @@ html[data-perf-mode="on"] [data-modal-ambient] {
 html[data-platform="android"] [data-modal-ambient] {
     display: none !important;
 }
-

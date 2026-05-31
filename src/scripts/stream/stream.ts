@@ -61,6 +61,10 @@ import {
 } from "@/scripts/lib/epg-data.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
 import { maybeB64ToUtf8, escapeHtml } from "@/scripts/lib/b64-utf8.ts"
+import {
+  buildCatchupStreamUrl,
+  canReplayProgramme,
+} from "@/scripts/lib/catchup.ts"
 
 const CHANNELS_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -123,6 +127,9 @@ function parseM3U(text) {
       chno: entry.chno ?? undefined,
       norm: normalize(`${entry.name} ${category} ${entry.tvgId || ""}`),
       url,
+      catchup: entry.catchup,
+      catchupDays: entry.catchupDays,
+      catchupSource: entry.catchupSource,
       userAgent: entry.userAgent,
       referer: entry.referer,
     })
@@ -1045,8 +1052,15 @@ function fmtAge(ms) {
   return `${d}d ago`
 }
 
+function isLikelyGroupMarkerName(name) {
+  const value = String(name || "").trim()
+  return /^-{2,}\s*[^-].*?-{2,}$/.test(value)
+}
+
 function paintChannels(data, fromCache, age) {
-  all = data
+  all = (Array.isArray(data) ? data : []).filter(
+    (channel) => !isLikelyGroupMarkerName(channel?.name)
+  )
   listStatus.textContent =
     `${all.length.toLocaleString()} channels` +
     (fromCache ? ` · cached, ${fmtAge(age)}` : "")
@@ -1056,12 +1070,28 @@ function paintChannels(data, fromCache, age) {
   ensureEpgLoaded()
 }
 
+function hasCatchupMetadata(data) {
+  return Array.isArray(data) && data.some((channel) =>
+    Object.prototype.hasOwnProperty.call(channel, "catchup") ||
+    Object.prototype.hasOwnProperty.call(channel, "catchupDays") ||
+    Object.prototype.hasOwnProperty.call(channel, "catchupSource")
+  )
+}
+
 function ensureEpgLoaded() {
   if (!activePlaylistId || !creds.host) return
   loadProgrammes(activePlaylistId, creds).catch(() => {})
 }
 
 let autoplayConsumed = false
+function paramsFromUrl(key) {
+  try {
+    return new URLSearchParams(window.location.search).get(key)
+  } catch {
+    return null
+  }
+}
+
 function maybeAutoplayFromUrl() {
   if (autoplayConsumed) return
   let id = null
@@ -1074,10 +1104,18 @@ function maybeAutoplayFromUrl() {
   autoplayConsumed = true
   const ch = all.find((c) => c.id === id)
   if (!ch) return
+  const catchupStart = Number(paramsFromUrl("catchupStart"))
+  const catchupStop = Number(paramsFromUrl("catchupStop"))
+  const replay =
+    Number.isFinite(catchupStart) && Number.isFinite(catchupStop)
+      ? { start: catchupStart, stop: catchupStop }
+      : null
   // Strip the ?channel= so refresh doesn't re-trigger.
   try {
     const url = new URL(window.location.href)
     url.searchParams.delete("channel")
+    url.searchParams.delete("catchupStart")
+    url.searchParams.delete("catchupStop")
     window.history.replaceState({}, "", url.toString())
   } catch {}
 
@@ -1086,7 +1124,7 @@ function maybeAutoplayFromUrl() {
     if (searchEl && searchEl.value) searchEl.value = ""
     applyFilter()
   }
-  play(ch.id, ch.name)
+  play(ch.id, ch.name, replay ? { replay } : undefined)
   requestAnimationFrame(() => {
     const idx = filtered.findIndex((channel) => channel.id === id)
     if (idx >= 0) scrollIntoViewByIdx(idx)
@@ -1122,6 +1160,7 @@ async function loadChannels() {
   const liveHit = getCached(active._id, "live")
   const m3uHit = getCached(active._id, "m3u")
   const hit = liveHit || m3uHit
+  const needsCatchupRefresh = !!(hit && !hasCatchupMetadata(hit.data))
   if (hit) {
     if (m3uHit) indexDirectUrls(hit.data)
     else directUrlById = new Map()
@@ -1136,7 +1175,7 @@ async function loadChannels() {
     if (!hit) showEmptyState()
     return
   }
-  if (hit) return // cache already painted; nothing else to do.
+  if (hit && !needsCatchupRefresh) return // cache already painted; nothing else to do.
 
   try {
     if (isLikelyM3USource(creds.host, creds.user, creds.pass)) {
@@ -1158,7 +1197,8 @@ async function loadChannels() {
             .sort((a, b) =>
               a.name.localeCompare(b.name, "en", { sensitivity: "base" })
             )
-        }
+        },
+        { force: needsCatchupRefresh }
       )
       indexDirectUrls(data)
       categoryMap = null
@@ -1214,6 +1254,8 @@ async function loadChannels() {
               category,
               logo: ch.stream_icon || null,
               tvgId: String(ch.epg_channel_id || "") || undefined,
+              catchup: Number(ch.tv_archive) ? "xtream" : null,
+              catchupDays: Number(ch.tv_archive_duration) || null,
               norm: normalize(name + " " + category),
             }
           })
@@ -1221,7 +1263,8 @@ async function loadChannels() {
           .sort((a, b) =>
             a.name.localeCompare(b.name, "en", { sensitivity: "base" })
           )
-      }
+      },
+      { force: needsCatchupRefresh }
     )
     directUrlById = new Map()
     log.log("[xt:livetv] cachedFetch returned len=", data?.length ?? 0, "fromCache=", fromCache)
@@ -1229,6 +1272,10 @@ async function loadChannels() {
     log.log("[xt:livetv] paintChannels done")
   } catch (e) {
     log.error("[xt:livetv] loadChannels threw:", e)
+    if (hit && needsCatchupRefresh) {
+      log.warn("[xt:livetv] using cached channels without catchup metadata")
+      return
+    }
     mountVirtualList([])
     renderProviderError(listStatus, {
       providerName: activePlaylistTitle,
@@ -1246,9 +1293,11 @@ let playSeq = 0
 let lastPlayContext = null
 let tuningOverlaySentinel = null
 let stallSentinel = null
+let startupSentinel = null
 let bufferingShownAt = 0
 let bufferingHideTimer = null
 const TUNING_MAX_MS = 8000
+const STARTUP_STALL_MS = 9000
 const STALL_AUTO_TUNE_MS = 30_000
 const BUFFERING_GRACE_MS = 350
 const ERROR_AUTO_RETRY_MS = 1500
@@ -1320,7 +1369,14 @@ const ensureEmbeddedPlayer = async (backend) => {
   }
   attachAudioOnlyDetection(vjs)
 
+  vjs.on("loadedmetadata", () => {
+    clearStartupSentinel()
+  })
+  vjs.on("canplay", () => {
+    clearStartupSentinel()
+  })
   vjs.on("playing", () => {
+    clearStartupSentinel()
     hideTuningOverlay()
     hideBufferingChip()
     clearStallSentinel()
@@ -1333,7 +1389,7 @@ const ensureEmbeddedPlayer = async (backend) => {
     showBufferingChip()
     armStallSentinel()
   })
-  vjs.on("error", () => {
+  vjs.on("error", async () => {
     const ctx = lastPlayContext
     if (!ctx) return
     const err = vjs.error?.()
@@ -1351,12 +1407,19 @@ const ensureEmbeddedPlayer = async (backend) => {
           vjs.reset?.()
           vjs.src({ src: ctx.src, type: "application/x-mpegURL" })
           vjs.play().catch(() => {})
+          armStartupSentinel()
         } catch {}
       }, ERROR_AUTO_RETRY_MS)
       return
     }
+    if (!ctx.tsFallbackTried && canTryXtreamTsFallback(ctx)) {
+      if (await retryAsXtreamTs(ctx, "player-error")) return
+      if (ctx.seq !== playSeq) return
+      ctx.tsFallbackTried = true
+    }
     hideTuningOverlay()
     hideBufferingChip()
+    clearStartupSentinel()
     clearStallSentinel()
     const dismissGeneric = toastError(
       t("stream.error.cantPlay", { channel: ctx.name || `#${ctx.streamId}` }),
@@ -1533,16 +1596,103 @@ function hideBufferingChip() {
   }, wait)
 }
 
+function getCurrentMediaElement(): HTMLMediaElement | null {
+  try {
+    const root = vjs?.el?.()
+    const media = root?.querySelector?.("video,audio")
+    if (media instanceof HTMLMediaElement) return media
+  } catch {}
+  const fallback = document
+    .getElementById("player-wrap")
+    ?.querySelector("video,audio")
+  return fallback instanceof HTMLMediaElement ? fallback : null
+}
+
+function clearStartupSentinel() {
+  if (startupSentinel) {
+    clearTimeout(startupSentinel)
+    startupSentinel = null
+  }
+}
+
+function canTryXtreamTsFallback(ctx) {
+  if (!ctx || ctx.tsFallbackTried) return false
+  if (hasDirectUrl(ctx.streamId)) return false
+  if (!/\.m3u8(?:[?#]|$)/i.test(ctx.src || "")) return false
+  if (!creds?.host || !creds?.user || !creds?.pass) return false
+  return true
+}
+
+async function retryAsXtreamTs(ctx, reason) {
+  if (!ctx || ctx.seq !== playSeq || !vjs || !canTryXtreamTsFallback(ctx)) return false
+  ctx.tsFallbackTried = true
+  try {
+    const fallbackSrc = await resolveStreamUrl((candidate) =>
+      buildDirectLiveUrl(ctx.streamId, { ...candidate, liveContainer: "ts" })
+    )
+    if (!fallbackSrc || fallbackSrc === ctx.src || ctx.seq !== playSeq) return false
+    log.warn("[xt:livetv] retrying live stream as MPEG-TS", {
+      streamId: ctx.streamId,
+      reason,
+      from: redactUrl(ctx.src),
+      to: redactUrl(fallbackSrc),
+    })
+    ctx.src = fallbackSrc
+    hideBufferingChip()
+    clearStallSentinel()
+    clearStartupSentinel()
+    try {
+      vjs.reset?.()
+      vjs.src({ src: fallbackSrc, type: "video/mp2t" })
+      vjs.play().catch(() => {})
+      armStartupSentinel()
+    } catch (err) {
+      log.warn("[xt:livetv] MPEG-TS fallback launch failed:", err)
+      return false
+    }
+    return true
+  } catch (err) {
+    log.warn("[xt:livetv] MPEG-TS fallback resolution failed:", err)
+    return false
+  }
+}
+
+function armStartupSentinel() {
+  clearStartupSentinel()
+  startupSentinel = setTimeout(() => {
+    const ctx = lastPlayContext
+    if (!ctx || !vjs || ctx.seq !== playSeq) return
+    const media = getCurrentMediaElement()
+    if (media && media.readyState >= 2) return
+    log.warn("[xt:livetv] startup sentinel fired", {
+      streamId: ctx.streamId,
+      readyState: media?.readyState,
+      networkState: media?.networkState,
+    })
+    if (!ctx.tsFallbackTried && canTryXtreamTsFallback(ctx)) {
+      retryAsXtreamTs(ctx, "startup-stall")
+      return
+    }
+    showBufferingChip()
+    armStallSentinel()
+  }, STARTUP_STALL_MS)
+}
+
 function armStallSentinel() {
   if (stallSentinel) clearTimeout(stallSentinel)
   stallSentinel = setTimeout(() => {
     const ctx = lastPlayContext
     if (!ctx || !vjs) return
+    if (!ctx.tsFallbackTried && canTryXtreamTsFallback(ctx)) {
+      retryAsXtreamTs(ctx, "stall")
+      return
+    }
     log.warn("[xt:livetv] stall sentinel re-tuning", { streamId: ctx.streamId })
     try {
       vjs.reset?.()
       vjs.src({ src: ctx.src, type: "application/x-mpegURL" })
       vjs.play().catch(() => {})
+      armStartupSentinel()
     } catch {}
   }, STALL_AUTO_TUNE_MS)
 }
@@ -1596,11 +1746,24 @@ function pickConfiguredExternal() {
   return null
 }
 
-async function play(streamId, name) {
+async function play(streamId, name, options = {}) {
   if (!currentEl) return
-  const src = hasDirectUrl(streamId)
-    ? getDirectUrl(streamId)
-    : await resolveStreamUrl((c) => buildDirectLiveUrl(streamId, c))
+  const channel = all.find((c) => c.id === streamId)
+  const replay = options?.replay || null
+  const replaySrc =
+    replay && channel ? buildCatchupStreamUrl(channel, replay, creds) : null
+  if (replay && !replaySrc) {
+    toastError(
+      t("stream.error.catchupUnavailable") ||
+        "Replay is not available for this programme."
+    )
+    return
+  }
+  const src =
+    replaySrc ||
+    (hasDirectUrl(streamId)
+      ? getDirectUrl(streamId)
+      : await resolveStreamUrl((c) => buildDirectLiveUrl(streamId, c)))
 
   // Embedded players (Video.js + hls.js) only speak http(s). M3U sources can
   // ship rtsp/rtmp/udp/mms/... - those need MPV/VLC
@@ -1642,7 +1805,6 @@ async function play(streamId, name) {
     pushRecent(activePlaylistId, "live", streamId, name, ch?.logo || null)
   }
 
-  const channel = all.find((c) => c.id === streamId)
   const channelLogo = channel?.logo ? safeHttpUrl(channel.logo) : null
 
   const sourceLogo = viewport?.querySelector(
@@ -1670,7 +1832,7 @@ async function play(streamId, name) {
     const wrap = document.createElement("div")
     wrap.className = "flex items-center gap-2 min-w-0 flex-1"
     wrap.innerHTML =
-      '<span class="status-badge status-badge--live shrink-0">ON</span>'
+      `<span class="status-badge status-badge--live shrink-0">${replay ? "REC" : "ON"}</span>`
     const label = document.createElement("span")
     label.className = "truncate min-w-0 flex-1"
     label.append(`Channel ${streamId}: `)
@@ -1741,7 +1903,7 @@ async function play(streamId, name) {
   if (!player) return
   await applyStreamHeaders(channelHeaders)
   const seq = ++playSeq
-  lastPlayContext = { streamId, name, src, seq, retried: false }
+  lastPlayContext = { streamId, name, src, seq, retried: false, replay: !!replay }
   hideBufferingChip()
   clearStallSentinel()
   try { player.reset?.() } catch {}
@@ -1750,8 +1912,9 @@ async function play(streamId, name) {
   if (playResult && typeof playResult.catch === "function") {
     playResult.catch(() => {})
   }
+  armStartupSentinel()
 
-  pushDiscordPresence(channel || { id: streamId, name }, "live")
+  pushDiscordPresence(channel || { id: streamId, name }, replay ? "replay" : "live")
 
   if (hasDirectUrl(streamId)) {
     paintSidePanelFromXmltv(streamId)
@@ -1924,9 +2087,11 @@ async function loadEPG(streamId) {
       }))
       .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.stop) && p.stop > p.start)
 
+    const epgChannel = all.find((c) => c.id === epgListChannelId)
     epgList.innerHTML = epgListData
       .map((p, idx) => {
         const isLive = p.start <= now && now < p.stop
+        const canReplay = canReplayProgramme(epgChannel, p, now)
         const start = fmtTime(p.start / 1000)
         const end = fmtTime(p.stop / 1000)
         const title = escapeHtml(p.title)
@@ -1938,7 +2103,7 @@ async function loadEPG(streamId) {
                    focus-visible:ring-2 focus-visible:ring-accent">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
-                ${isLive ? '<span class="size-1.5 rounded-full bg-accent shrink-0" aria-label="Now playing"></span>' : ""}
+                ${isLive ? '<span class="size-1.5 rounded-full bg-accent shrink-0" aria-label="Now playing"></span>' : canReplay ? '<span class="text-2xs text-accent font-semibold shrink-0">REC</span>' : ""}
                 <div class="font-medium text-fg truncate">${title}</div>
               </div>
               <div class="text-xs text-fg-3 tabular-nums shrink-0">${start}–${end}</div>
@@ -1985,17 +2150,20 @@ function paintSidePanelFromXmltv(streamId) {
   }
 
   const now = Date.now()
-  const upcoming = programmes.filter((programme) => programme.stop >= now).slice(0, 10)
-  if (!upcoming.length) {
+  const withReplayWindow = programmes
+    .filter((programme) => programme.stop >= now || canReplayProgramme(channel, programme, now))
+    .slice(0, 10)
+  if (!withReplayWindow.length) {
     epgList.innerHTML = `<div class="text-fg-3" data-i18n="epg.sidePanelEmpty">${escapeHtml(t("epg.sidePanelEmpty"))}</div>`
     epgListData = []
     return
   }
 
-  epgListData = upcoming
-  epgList.innerHTML = upcoming
+  epgListData = withReplayWindow
+  epgList.innerHTML = withReplayWindow
     .map((programme, idx) => {
       const isLive = programme.start <= now && now < programme.stop
+      const canReplay = canReplayProgramme(channel, programme, now)
       const start = fmtTime(programme.start / 1000)
       const end = fmtTime(programme.stop / 1000)
       const title = escapeHtml(programme.title)
@@ -2007,7 +2175,7 @@ function paintSidePanelFromXmltv(streamId) {
                  focus-visible:ring-2 focus-visible:ring-accent">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
-              ${isLive ? '<span class="size-1.5 rounded-full bg-accent shrink-0" aria-label="Now playing"></span>' : ""}
+              ${isLive ? '<span class="size-1.5 rounded-full bg-accent shrink-0" aria-label="Now playing"></span>' : canReplay ? '<span class="text-2xs text-accent font-semibold shrink-0">REC</span>' : ""}
               <div class="font-medium text-fg truncate">${title}</div>
             </div>
             <div class="text-xs text-fg-3 tabular-nums shrink-0">${start}–${end}</div>
@@ -2033,9 +2201,12 @@ epgList?.addEventListener("click", async (e) => {
     stop: entry.stop,
     channelName: epgListChannelName,
     channelId: epgListChannelId,
+    canReplay: canReplayProgramme(all.find((c) => c.id === epgListChannelId), entry),
     onWatch: () => {
-      if (currentlyPlayingId !== epgListChannelId && epgListChannelId) {
-        play(epgListChannelId, epgListChannelName)
+      if (epgListChannelId) {
+        const now = Date.now()
+        const replay = entry.stop <= now ? { start: entry.start, stop: entry.stop } : null
+        play(epgListChannelId, epgListChannelName, replay ? { replay } : undefined)
       }
     },
   })

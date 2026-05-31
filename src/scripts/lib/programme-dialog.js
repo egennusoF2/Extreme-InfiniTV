@@ -158,6 +158,7 @@ function renderProgramme(node, opts) {
  * @param {number} opts.stop  - epoch ms
  * @param {string} [opts.channelName]
  * @param {number|string} [opts.channelId]
+ * @param {boolean} [opts.canReplay] - show playback CTA for ended catchup programmes
  * @param {() => void} [opts.onWatch] - if omitted and channelId is set, navigates to /livetv?channel=<id>
  */
 export function openProgrammeDialog(opts) {
@@ -169,6 +170,7 @@ export function openProgrammeDialog(opts) {
 
   const now = Date.now()
   const isLive = opts.start <= now && now < opts.stop
+  const isReplay = !isLive && opts.stop <= now && !!opts.canReplay
   const watch = /** @type {HTMLButtonElement | null} */ (
     node.querySelector("[data-role='watch']")
   )
@@ -177,15 +179,20 @@ export function openProgrammeDialog(opts) {
   )
   let showWatch = false
   if (watch) {
-    showWatch = isLive && (opts.onWatch != null || opts.channelId != null)
+    showWatch = (isLive || isReplay) && (opts.onWatch != null || opts.channelId != null)
     if (showWatch) {
+      watch.textContent = isReplay ? t("programme.watchReplay") : t("programme.watchNow")
       watch.onclick = () => {
         node.close()
         if (opts.onWatch) opts.onWatch()
         else if (opts.channelId != null) {
-          window.location.href = `/livetv?channel=${encodeURIComponent(
-            String(opts.channelId)
-          )}`
+          const url = new URL("/livetv", window.location.origin)
+          url.searchParams.set("channel", String(opts.channelId))
+          if (isReplay) {
+            url.searchParams.set("catchupStart", String(opts.start))
+            url.searchParams.set("catchupStop", String(opts.stop))
+          }
+          window.location.href = url.toString()
         }
       }
     } else {

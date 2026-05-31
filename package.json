@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "sync:upstream": "bash ./scripts/sync-upstream.sh",
     "screenshots": "node ./src/scripts/capture-screenshots.mjs",
     "msix": "node ./buildfiles/make-msix-template.mjs",
     "sync-version": "node ./buildfiles/sync-version.mjs"
@@ -40,6 +41,7 @@
     "@tauri-apps/plugin-window-state": "~2.4.1",
     "artplayer": "^5.4.0",
     "astro": "^6.3.3",
+    "dashjs": "^5.2.0",
     "dompurify": "^3.4.3",
     "hls.js": "^1.6.16",
     "marked": "^18.0.3",

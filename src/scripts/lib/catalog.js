@@ -90,10 +90,18 @@ function m3uToChannelList(text) {
       tvgId: entry.tvgId || undefined,
       norm: normalize(`${entry.name} ${category} ${entry.tvgId || ""}`),
       url: entry.url,
+      catchup: entry.catchup,
+      catchupDays: entry.catchupDays,
+      catchupSource: entry.catchupSource,
       isRadio: !!entry.isRadio,
     })
   }
   return out
+}
+
+function isLikelyGroupMarkerName(name) {
+  const value = String(name || "").trim()
+  return /^-{2,}\s*[^-].*?-{2,}$/.test(value)
 }
 
 export async function ensureLive(creds, playlistId, opts = {}) {
@@ -153,10 +161,12 @@ export async function ensureLive(creds, playlistId, opts = {}) {
           category,
           logo: ch.stream_icon || null,
           tvgId: String(ch.epg_channel_id || "") || undefined,
+          catchup: Number(ch.tv_archive) ? "xtream" : null,
+          catchupDays: Number(ch.tv_archive_duration) || null,
           norm: normalize(name + " " + category),
         }
       })
-      .filter((x) => x.id && x.name)
+      .filter((x) => x.id && x.name && !isLikelyGroupMarkerName(x.name))
       .sort((a, b) =>
         a.name.localeCompare(b.name, "en", { sensitivity: "base" })
       )
