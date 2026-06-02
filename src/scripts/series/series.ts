@@ -29,6 +29,8 @@ import {
   STAR_OUTLINE,
   STAR_FILLED,
 } from "@/scripts/lib/entry-card.js"
+import { isExcludedCatalogTitle } from "@/scripts/lib/category-order.ts"
+import { loadXtreamCategoryMaps } from "@/scripts/lib/catalog.js"
 
 const SERIES_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -62,6 +64,8 @@ let filtered = []
 
 /** @type {Map<string,string> | null} */
 let categoryMap = null
+/** @type {string[]} */
+let seriesCategoryOrder = []
 
 let activePlaylistId = ""
 let activePlaylistTitle = ""
@@ -76,6 +80,7 @@ const picker = mountCategoryPicker({
   activeCatChangedEvent: "xt:series-cat-changed",
   getActivePlaylistId: () => activePlaylistId,
   getItems: () => all,
+  getCategoryOrder: () => seriesCategoryOrder,
 })
 document.addEventListener("xt:series-cat-changed", () => applyFilter())
 
@@ -148,19 +153,11 @@ function refreshSeriesProgressBadges(specificSeriesId) {
 // Categories
 // ----------------------------
 async function ensureSeriesCategoryMap() {
-  if (categoryMap) return categoryMap
-  const r = await xtreamApiFetch("get_series_categories")
-  const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  categoryMap = new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  if (categoryMap && seriesCategoryOrder.length) return categoryMap
+  if (!activePlaylistId) return categoryMap || new Map()
+  const { map, order } = await loadXtreamCategoryMaps(activePlaylistId, "series")
+  categoryMap = map
+  seriesCategoryOrder = order
   return categoryMap
 }
 
@@ -629,10 +626,30 @@ async function loadSeries() {
     showEmptyState()
     return
   }
+  const prevPlaylistId = activePlaylistId
   activePlaylistId = active._id
   activePlaylistTitle = active.title || ""
+  if (prevPlaylistId !== activePlaylistId) {
+    categoryMap = null
+    seriesCategoryOrder = []
+  }
   await ensurePrefsLoaded()
   syncSortControl()
+
+  creds = await loadCreds()
+  if (!creds.host) {
+    showEmptyState()
+    return
+  }
+
+  if (creds.user && creds.pass) {
+    try {
+      await ensureSeriesCategoryMap()
+    } catch (error) {
+      log.warn("[xt:series] category order load failed", error)
+    }
+  }
+
   await hydrateCache(active._id, "series")
 
   const hit = getCached(active._id, "series")
@@ -643,11 +660,6 @@ async function loadSeries() {
     if (!gridEl?.querySelector("[data-skeleton]")) renderPosterSkeletons(gridEl)
   }
 
-  creds = await loadCreds()
-  if (!creds.host) {
-    if (!hit) showEmptyState()
-    return
-  }
   if (!creds.user || !creds.pass) {
     listStatus.textContent = t("series.requiresXtream")
     return
@@ -706,10 +718,7 @@ async function loadSeries() {
               norm: normalize(`${name} ${category} ${year}`),
             }
           })
-          .filter((s) => s.id && s.name)
-          .sort((a, b) =>
-            a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-          )
+          .filter((s) => s.id && s.name && !isExcludedCatalogTitle(s.name))
       }
     )
     paintSeries(data, fromCache, age)

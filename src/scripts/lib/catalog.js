@@ -14,10 +14,27 @@ import { ensureUserInfo } from "@/scripts/lib/account-info.js"
 import { parseM3U } from "@/scripts/lib/m3u-parser.ts"
 import { t } from "@/scripts/lib/i18n.js"
 import { retryWithBackoff, HttpRetryError } from "@/scripts/lib/retry.ts"
+import {
+  isExcludedCatalogTitle,
+  parseXtreamCategories,
+} from "@/scripts/lib/category-order.ts"
 
 const CHANNELS_TTL_MS = 24 * 60 * 60 * 1000
 const VOD_TTL_MS = 24 * 60 * 60 * 1000
 const SERIES_TTL_MS = 24 * 60 * 60 * 1000
+const CATEGORY_MAP_TTL_MS = 24 * 60 * 60 * 1000
+
+const CATEGORY_API_ACTION = {
+  vod: "get_vod_categories",
+  series: "get_series_categories",
+  live: "get_live_categories",
+}
+
+const CATEGORY_CACHE_KIND = {
+  vod: "vod_categories",
+  series: "series_categories",
+  live: "live_categories",
+}
 
 const EVT_WARMED = "xt:catalog-warmed"
 const EVT_WARMING_START = "xt:catalog-warming-start"
@@ -56,22 +73,43 @@ function makeBytesEmitter(playlistId, kind) {
 }
 
 // ---------------------------------------------------------------------------
+// Category order (cached separately — must load before picker render)
+// ---------------------------------------------------------------------------
+/** @param {string} playlistId @param {"vod"|"series"|"live"} mediaKind */
+export async function loadXtreamCategoryMaps(playlistId, mediaKind) {
+  if (!playlistId) return { map: new Map(), order: [] }
+  const cacheKind = CATEGORY_CACHE_KIND[mediaKind]
+  const action = CATEGORY_API_ACTION[mediaKind]
+  const { data } = await cachedFetch(
+    playlistId,
+    cacheKind,
+    CATEGORY_MAP_TTL_MS,
+    async () => {
+      const r = await xtreamApiFetch(action)
+      if (!r.ok) throw new HttpRetryError(r.status, `${action} ${r.status}`)
+      const json = await r.json().catch(() => [])
+      const parsed = parseXtreamCategories(json)
+      return {
+        order: parsed.order,
+        mapEntries: [...parsed.map.entries()],
+      }
+    },
+  )
+  if (!data) return { map: new Map(), order: [] }
+  return {
+    map: new Map(data.mapEntries || []),
+    order: Array.isArray(data.order) ? data.order : [],
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Live (Xtream + M3U)
 // ---------------------------------------------------------------------------
 async function fetchLiveCategoryMap() {
   const r = await xtreamApiFetch("get_live_categories")
   if (!r.ok) throw new HttpRetryError(r.status, `live_categories ${r.status}`)
   const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  return new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  return parseXtreamCategories(data).map
 }
 
 function m3uToChannelList(text) {
@@ -99,11 +137,6 @@ function m3uToChannelList(text) {
   return out
 }
 
-function isLikelyGroupMarkerName(name) {
-  const value = String(name || "").trim()
-  return /^-{2,}\s*[^-].*?-{2,}$/.test(value)
-}
-
 export async function ensureLive(creds, playlistId, opts = {}) {
   const isM3U = isLikelyM3USource(creds.host, creds.user, creds.pass)
   const kind = isM3U ? "m3u" : "live"
@@ -125,9 +158,7 @@ export async function ensureLive(creds, playlistId, opts = {}) {
           localStorage.setItem(`xt_m3u_epg:${playlistId}`, epgUrl)
         }
       } catch {}
-      return m3uToChannelList(text).sort((a, b) =>
-        a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-      )
+      return m3uToChannelList(text)
     }
     const catMap = await fetchLiveCategoryMap()
     const r = await xtreamApiFetch("get_live_streams")
@@ -166,10 +197,7 @@ export async function ensureLive(creds, playlistId, opts = {}) {
           norm: normalize(name + " " + category),
         }
       })
-      .filter((x) => x.id && x.name && !isLikelyGroupMarkerName(x.name))
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-      )
+      .filter((x) => x.id && x.name && !isExcludedCatalogTitle(x.name))
   }), { force: !!opts.force })
   return data || []
 }
@@ -181,16 +209,7 @@ async function fetchVodCategoryMap() {
   const r = await xtreamApiFetch("get_vod_categories")
   if (!r.ok) throw new HttpRetryError(r.status, `vod_categories ${r.status}`)
   const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  return new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  return parseXtreamCategories(data).map
 }
 
 export async function ensureVod(creds, playlistId, opts = {}) {
@@ -236,10 +255,7 @@ export async function ensureVod(creds, playlistId, opts = {}) {
           norm: normalize(`${name} ${category} ${year}`),
         }
       })
-      .filter((m) => m.id && m.name)
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-      )
+      .filter((m) => m.id && m.name && !isExcludedCatalogTitle(m.name))
   }), { force: !!opts.force })
   return data || []
 }
@@ -251,16 +267,7 @@ async function fetchSeriesCategoryMap() {
   const r = await xtreamApiFetch("get_series_categories")
   if (!r.ok) throw new HttpRetryError(r.status, `series_categories ${r.status}`)
   const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  return new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  return parseXtreamCategories(data).map
 }
 
 export async function ensureSeries(creds, playlistId, opts = {}) {
@@ -310,10 +317,7 @@ export async function ensureSeries(creds, playlistId, opts = {}) {
           norm: normalize(`${name} ${category} ${year}`),
         }
       })
-      .filter((s) => s.id && s.name)
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-      )
+      .filter((s) => s.id && s.name && !isExcludedCatalogTitle(s.name))
   }), { force: !!opts.force })
   return data || []
 }

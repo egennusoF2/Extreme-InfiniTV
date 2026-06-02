@@ -30,6 +30,11 @@ import { attachPlayerFocusKeeper } from "@/scripts/lib/player-focus-keeper.js"
 import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { togglePip } from "@/scripts/lib/pip-toggle.js"
 import { parseM3U as parseSharedM3U } from "@/scripts/lib/m3u-parser.ts"
+import {
+  isExcludedCatalogTitle,
+  categoryOrderFromItems,
+} from "@/scripts/lib/category-order.ts"
+import { loadXtreamCategoryMaps } from "@/scripts/lib/catalog.js"
 import { applyStreamHeaders } from "@/scripts/lib/stream-headers.ts"
 import { renderProviderError } from "@/scripts/lib/provider-error.js"
 import { toast, toastError } from "@/scripts/lib/toast.js"
@@ -309,6 +314,7 @@ const picker = mountCategoryPicker({
   activeCatChangedEvent: "xt:cat-changed",
   getActivePlaylistId: () => activePlaylistId,
   getItems: () => all,
+  getCategoryOrder: () => liveCategoryOrder,
 })
 document.addEventListener("xt:cat-changed", () => scheduleApplyFilter())
 
@@ -366,6 +372,8 @@ function renderChannelSkeletons(count) {
 
 /** @type {Map<string,string> | null} */
 let categoryMap = null
+/** @type {string[]} */
+let liveCategoryOrder = []
 
 const OVERSCAN_DEFAULT = 6
 const OVERSCAN_PERF = 2
@@ -1038,20 +1046,17 @@ const applyFilter = () => {
 searchEl?.addEventListener("input", debounce(applyFilter, 160))
 
 async function ensureCategoryMap() {
-  if (categoryMap) return categoryMap
-  const r = await xtreamApiFetch("get_live_categories")
-  const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  categoryMap = new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  if (categoryMap && liveCategoryOrder.length) return categoryMap
+  if (!activePlaylistId) return categoryMap || new Map()
+  const { map, order } = await loadXtreamCategoryMaps(activePlaylistId, "live")
+  categoryMap = map
+  liveCategoryOrder = order
   return categoryMap
+}
+
+function applyM3uCategoryOrder(channels) {
+  const uncategorized = t("stream.uncategorized") || "Uncategorized"
+  liveCategoryOrder = categoryOrderFromItems(channels, uncategorized)
 }
 
 
@@ -1170,10 +1175,31 @@ async function loadChannels() {
     showEmptyState()
     return
   }
+  const prevPlaylistId = activePlaylistId
   activePlaylistId = active._id
   activePlaylistTitle = active.title || ""
+  if (prevPlaylistId !== activePlaylistId) {
+    categoryMap = null
+    liveCategoryOrder = []
+  }
 
   await ensurePrefsLoaded()
+
+  creds = await loadCreds()
+  if (!creds.host) {
+    showEmptyState()
+    return
+  }
+
+  const isM3U = isLikelyM3USource(creds.host, creds.user, creds.pass)
+  if (!isM3U && creds.user && creds.pass) {
+    try {
+      await ensureCategoryMap()
+    } catch (error) {
+      log.warn("[xt:livetv] category order load failed", error)
+    }
+  }
+
   await Promise.all([
     hydrateCache(active._id, "live"),
     hydrateCache(active._id, "m3u"),
@@ -1184,19 +1210,18 @@ async function loadChannels() {
   const hit = liveHit || m3uHit
   const needsCatchupRefresh = !!(hit && !hasCatchupMetadata(hit.data))
   if (hit) {
-    if (m3uHit) indexDirectUrls(hit.data)
-    else directUrlById = new Map()
+    if (m3uHit) {
+      indexDirectUrls(hit.data)
+      applyM3uCategoryOrder(hit.data)
+    } else {
+      directUrlById = new Map()
+    }
     paintChannels(hit.data, true, hit.age)
   } else {
     listStatus.textContent = t("stream.loading")
     if (!viewport?.querySelector("[data-skeleton]")) renderChannelSkeletons()
   }
 
-  creds = await loadCreds()
-  if (!creds.host) {
-    if (!hit) showEmptyState()
-    return
-  }
   if (hit && !needsCatchupRefresh) return // cache already painted; nothing else to do.
 
   try {
@@ -1214,16 +1239,14 @@ async function loadChannels() {
             if (!r.ok) throw new Error(`M3U ${r.status}: ${await r.text()}`)
             text = await r.text()
           }
-          return parseM3U(text)
-            .filter((x) => x.url && x.name)
-            .sort((a, b) =>
-              a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-            )
+          return parseM3U(text).filter(
+            (x) => x.url && x.name && !isExcludedCatalogTitle(x.name),
+          )
         },
         { force: needsCatchupRefresh }
       )
       indexDirectUrls(data)
-      categoryMap = null
+      applyM3uCategoryOrder(data)
       if (m3uEpgUrl) {
         try {
           localStorage.setItem(`xt_m3u_epg:${active._id}`, m3uEpgUrl)
@@ -1281,10 +1304,7 @@ async function loadChannels() {
               norm: normalize(name + " " + category),
             }
           })
-          .filter((x) => x.id && x.name)
-          .sort((a, b) =>
-            a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-          )
+          .filter((x) => x.id && x.name && !isExcludedCatalogTitle(x.name))
       },
       { force: needsCatchupRefresh }
     )

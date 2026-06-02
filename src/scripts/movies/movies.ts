@@ -30,6 +30,8 @@ import {
   STAR_FILLED,
 } from "@/scripts/lib/entry-card.js"
 import { buildMovieStreamUrl } from "@/scripts/lib/stream-urls.ts"
+import { isExcludedCatalogTitle } from "@/scripts/lib/category-order.ts"
+import { loadXtreamCategoryMaps } from "@/scripts/lib/catalog.js"
 
 const VOD_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -64,6 +66,8 @@ let filtered = []
 
 /** @type {Map<string,string> | null} */
 let categoryMap = null
+/** @type {string[]} */
+let vodCategoryOrder = []
 
 let activePlaylistId = ""
 let activePlaylistTitle = ""
@@ -78,6 +82,7 @@ const picker = mountCategoryPicker({
   activeCatChangedEvent: "xt:movie-cat-changed",
   getActivePlaylistId: () => activePlaylistId,
   getItems: () => all,
+  getCategoryOrder: () => vodCategoryOrder,
 })
 document.addEventListener("xt:movie-cat-changed", () => applyFilter())
 
@@ -121,19 +126,11 @@ document.addEventListener("xt:category-mode-changed", onMovieFilterChange)
 // Categories
 // ----------------------------
 async function ensureVodCategoryMap() {
-  if (categoryMap) return categoryMap
-  const r = await xtreamApiFetch("get_vod_categories")
-  const data = await r.json().catch(() => [])
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.categories)
-    ? data.categories
-    : []
-  categoryMap = new Map(
-    arr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [String(c.category_id), String(c.category_name || "").trim()])
-  )
+  if (categoryMap && vodCategoryOrder.length) return categoryMap
+  if (!activePlaylistId) return categoryMap || new Map()
+  const { map, order } = await loadXtreamCategoryMaps(activePlaylistId, "vod")
+  categoryMap = map
+  vodCategoryOrder = order
   return categoryMap
 }
 
@@ -559,10 +556,30 @@ async function loadMovies() {
     showEmptyState()
     return
   }
+  const prevPlaylistId = activePlaylistId
   activePlaylistId = active._id
   activePlaylistTitle = active.title || ""
+  if (prevPlaylistId !== activePlaylistId) {
+    categoryMap = null
+    vodCategoryOrder = []
+  }
   await ensurePrefsLoaded()
   syncSortControl()
+
+  creds = await loadCreds()
+  if (!creds.host) {
+    showEmptyState()
+    return
+  }
+
+  if (creds.user && creds.pass) {
+    try {
+      await ensureVodCategoryMap()
+    } catch (error) {
+      log.warn("[xt:movies] category order load failed", error)
+    }
+  }
+
   await hydrateCache(active._id, "vod")
 
   const hit = getCached(active._id, "vod")
@@ -573,11 +590,6 @@ async function loadMovies() {
     if (!gridEl?.querySelector("[data-skeleton]")) renderPosterSkeletons(gridEl)
   }
 
-  creds = await loadCreds()
-  if (!creds.host) {
-    if (!hit) showEmptyState()
-    return
-  }
   if (!creds.user || !creds.pass) {
     listStatus.textContent = t("movies.requiresXtream")
     return
@@ -632,10 +644,7 @@ async function loadMovies() {
               norm: normalize(`${name} ${category} ${year}`),
             }
           })
-          .filter((m) => m.id && m.name)
-          .sort((a, b) =>
-            a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-          )
+          .filter((m) => m.id && m.name && !isExcludedCatalogTitle(m.name))
       }
     )
 

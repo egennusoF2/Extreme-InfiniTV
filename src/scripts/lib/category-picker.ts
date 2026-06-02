@@ -25,6 +25,7 @@ import {
   resolveEpgKind,
 } from "@/scripts/lib/preferences.js"
 import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
+import { orderCategoryNames } from "@/scripts/lib/category-order.ts"
 
 const CAT_FAVORITES = "__favorites__"
 const CAT_RECENTS = "__recents__"
@@ -58,6 +59,8 @@ export interface CategoryPickerOptions {
   getActivePlaylistId(): string
   /** Read-only accessor for the channel / movie / series items. */
   getItems(): CategoryPickerItem[]
+  /** Provider category order from `get_*_categories` (optional). */
+  getCategoryOrder?: () => string[]
   /**
    * The kind used to source favourites / recents pseudo-rows. EPG shows
    * Live TV favourites, so it overrides to "live"; the others default to
@@ -361,9 +364,9 @@ export function mountCategoryPicker(
     if (!listEl) return
     const items = opts.getItems()
     const counts = computeCategoryCounts(items)
-    const names = Array.from(counts.keys()).sort((a, b) =>
-      a.localeCompare(b, "en", { sensitivity: "base" })
-    )
+    const uncategorized = t("list.uncategorized") || "Uncategorized"
+    const apiOrder = opts.getCategoryOrder?.() ?? []
+    const names = orderCategoryNames(counts, items, apiOrder, uncategorized)
     const mode = categoryMode()
     const hidden = hiddenSet()
     const allowed = allowedSet()

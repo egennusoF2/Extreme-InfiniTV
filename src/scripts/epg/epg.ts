@@ -29,6 +29,11 @@ import {
   CHANNEL_EPG_CHANGED_EVENT,
 } from "@/scripts/lib/preferences.js"
 import { mountCategoryPicker } from "@/scripts/lib/category-picker.ts"
+import {
+  isExcludedCatalogTitle,
+  categoryOrderFromItems,
+} from "@/scripts/lib/category-order.ts"
+import { loadXtreamCategoryMaps } from "@/scripts/lib/catalog.js"
 import { canReplayProgramme } from "@/scripts/lib/catchup.ts"
 
 const CAT_FAVORITES = "__favorites__"
@@ -75,6 +80,8 @@ let allChannels = []
 const programmes = new Map()
 let viewStart = 0
 let useStreamIdProgrammeKeys = false
+/** @type {string[]} */
+let epgCategoryOrder = []
 
 const picker = mountCategoryPicker({
   kind: "epg",
@@ -86,6 +93,7 @@ const picker = mountCategoryPicker({
   // counts every entry — not just ones with a tvg-id. The schedule grid
   // continues to drop tvg-id-less rows downstream.
   getItems: () => allChannels,
+  getCategoryOrder: () => epgCategoryOrder,
 })
 
 function setStatus(text) {
@@ -719,23 +727,11 @@ function pickChannelsByCategory(cachedChannels) {
 }
 
 async function fetchXtreamChannels() {
-  // Categories first so we can resolve `category_id → name` for streams.
-  const catRes = await xtreamApiFetch("get_live_categories")
-  if (!catRes.ok) throw new Error(`HTTP ${catRes.status}`)
-  const catData = await catRes.json().catch(() => [])
-  const catArr = Array.isArray(catData)
-    ? catData
-    : Array.isArray(catData?.categories)
-    ? catData.categories
-    : []
-  const catMap = new Map(
-    catArr
-      .filter((c) => c && c.category_id != null)
-      .map((c) => [
-        String(c.category_id),
-        String(c.category_name || "").trim(),
-      ])
+  const { map: catMap, order } = await loadXtreamCategoryMaps(
+    activePlaylistId,
+    "live",
   )
+  epgCategoryOrder = order
 
   const r = await xtreamApiFetch("get_live_streams")
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -772,10 +768,7 @@ async function fetchXtreamChannels() {
         catchupDays: Number(ch.tv_archive_duration) || null,
       }
     })
-    .filter((x) => x.id && x.name)
-    .sort((a, b) =>
-      a.name.localeCompare(b.name, "en", { sensitivity: "base" })
-    )
+    .filter((x) => x.id && x.name && !isExcludedCatalogTitle(x.name))
 }
 
 function decodeMaybeB64(value) {
@@ -942,6 +935,15 @@ async function init() {
   syncCategoryTitle()
 
   const isM3U = isLikelyM3USource(creds.host, creds.user, creds.pass)
+  if (!isM3U && creds.user && creds.pass) {
+    try {
+      const { order } = await loadXtreamCategoryMaps(activePlaylistId, "live")
+      epgCategoryOrder = order
+    } catch (error) {
+      log.warn("[xt:epg] category order load failed", error)
+    }
+  }
+
   // Hydrate from IDB before reading
   await hydrateCache(activePlaylistId, isM3U ? "m3u" : "live")
   let cached =
@@ -970,6 +972,12 @@ async function init() {
   }
 
   allChannels = cached
+  if (isM3U && !epgCategoryOrder.length) {
+    epgCategoryOrder = categoryOrderFromItems(
+      allChannels,
+      t("stream.uncategorized") || "Uncategorized",
+    )
+  }
   picker.rerender()
 
   viewStart = roundHalfHourFloor(Date.now() - 30 * 60 * 1000)
