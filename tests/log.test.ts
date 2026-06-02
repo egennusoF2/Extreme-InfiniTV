@@ -26,9 +26,20 @@ describe("redactUrl", () => {
     const out = redactUrl(
       "https://provider.tld:8080/live/alice/hunter2/1234.m3u8?token=abcdef",
     )
-    // Path-segment creds aren't query params; only the token gets stripped.
+    expect(out).toContain("/live/***/***/1234.m3u8")
     expect(out).toContain("token=***")
+    expect(out).not.toContain("alice")
+    expect(out).not.toContain("hunter2")
     expect(out).not.toContain("abcdef")
+  })
+
+  it("redacts encoded Xtream paths inside dev-proxy URLs", () => {
+    const out = redactUrl(
+      "/__stream?url=http%3A%2F%2Fprovider.tld%2Fmovie%2Falice%2Fhunter2%2F202400.mkv",
+    )
+    expect(out).toContain("%2Fmovie%2F***%2F***%2F202400.mkv")
+    expect(out).not.toContain("alice")
+    expect(out).not.toContain("hunter2")
   })
 
   it("redacts common credential param names", () => {

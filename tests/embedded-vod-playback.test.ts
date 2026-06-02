@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 import {
   toHlsSiblingUrl,
+  toMp4SiblingUrl,
   isXtreamVodContainerUrl,
+  looksLikeOfflineFallback,
 } from "../src/scripts/lib/embedded-vod-playback"
 
 describe("toHlsSiblingUrl", () => {
@@ -20,6 +22,20 @@ describe("toHlsSiblingUrl", () => {
   it("returns null when already m3u8", () => {
     expect(
       toHlsSiblingUrl("http://panel.example.com/movie/u/p/1.m3u8"),
+    ).toBeNull()
+  })
+})
+
+describe("toMp4SiblingUrl", () => {
+  it("rewrites mkv to mp4", () => {
+    expect(
+      toMp4SiblingUrl("http://panel.example.com/movie/u/p/123.mkv"),
+    ).toBe("http://panel.example.com/movie/u/p/123.mp4")
+  })
+
+  it("returns null when already mp4", () => {
+    expect(
+      toMp4SiblingUrl("http://panel.example.com/movie/u/p/123.mp4"),
     ).toBeNull()
   })
 })
@@ -49,5 +65,16 @@ describe("preferVodHlsUrl iOS fallback", () => {
     const mkv = "http://panel.example.com/movie/u/p/123.mkv"
     expect(toHlsSiblingUrl(mkv)).toBe("http://panel.example.com/movie/u/p/123.m3u8")
     expect(isXtreamVodContainerUrl(mkv)).toBe(true)
+  })
+})
+
+describe("looksLikeOfflineFallback", () => {
+  it("detects provider placeholder MP4 fallbacks", () => {
+    expect(looksLikeOfflineFallback("http://cdn.example.com/TS_OFFLINE.mp4")).toBe(true)
+    expect(looksLikeOfflineFallback("video placeholder content")).toBe(true)
+  })
+
+  it("does not flag normal stream urls", () => {
+    expect(looksLikeOfflineFallback("http://cdn.example.com/movie/u/p/202400.mkv")).toBe(false)
   })
 })

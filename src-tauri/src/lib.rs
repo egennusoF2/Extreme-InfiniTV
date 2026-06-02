@@ -4,6 +4,8 @@ mod discord;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod external_player;
 
+mod media_proxy;
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
 
@@ -68,6 +70,7 @@ pub fn run() {
             discord::discord_clear,
             discord::discord_disconnect,
             external_player::launch_external_player,
+            media_proxy::media_proxy_url,
             tray::set_close_to_tray,
         ]);
 

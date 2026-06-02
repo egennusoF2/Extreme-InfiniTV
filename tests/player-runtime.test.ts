@@ -114,12 +114,12 @@ describe("buildVlcArgs", () => {
     expect(args.at(-1)).toBe(SRC)
   })
 
-  it("includes --play-and-exit, --no-qt-error-dialogs, --no-fullscreen, --no-qt-minimal-view by default", () => {
+  it("includes --play-and-exit, --no-qt-error-dialogs and --no-fullscreen by default", () => {
     const args = buildVlcArgs({ src: SRC })
     expect(args).toContain("--play-and-exit")
     expect(args).toContain("--no-qt-error-dialogs")
     expect(args).toContain("--no-fullscreen")
-    expect(args).toContain("--no-qt-minimal-view")
+    expect(args).not.toContain("--no-qt-minimal-view")
     expect(args).not.toContain("--no-video-title-show")
   })
 

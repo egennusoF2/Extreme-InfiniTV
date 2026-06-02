@@ -76,6 +76,7 @@ import {
 } from "@/scripts/lib/embedded-media-fetch"
 import { preferHttpsStreamUrl } from "@/scripts/lib/stream-proxy"
 import { installDevStreamFetchPatch } from "@/scripts/lib/dev-stream-fetch-patch"
+import { setStreamStatus } from "@/scripts/lib/stream-state-cache"
 
 installDevStreamFetchPatch()
 
@@ -1397,6 +1398,7 @@ const ensureEmbeddedPlayer = async (backend) => {
     clearStartupSentinel()
   })
   vjs.on("playing", () => {
+    if (lastPlayContext?.src) setStreamStatus(lastPlayContext.src, "online")
     clearStartupSentinel()
     hideTuningOverlay()
     hideBufferingChip()
@@ -1448,6 +1450,7 @@ const ensureEmbeddedPlayer = async (backend) => {
     hideBufferingChip()
     clearStartupSentinel()
     clearStallSentinel()
+    if (ctx.src) setStreamStatus(ctx.src, "offline")
     const dismissGeneric = toastError(
       t("stream.error.cantPlay", { channel: ctx.name || `#${ctx.streamId}` }),
       { description: t("stream.error.checkConnection") }
@@ -2419,3 +2422,24 @@ if (listStatus && /no playlist selected/i.test(listStatus.textContent || "")) {
     showEmptyState()
   }
 })()
+
+// Preload player modules in the background so the first channel click
+// doesn't pay the cold-import cost for ArtPlayer, hls.js and their deps.
+// On iOS, hls.js is never used (native HLS), so skip it to avoid any
+// side-effects from loading a large MSE-dependent library unnecessarily.
+setTimeout(() => {
+  import("@/scripts/lib/stream-proxy.js")
+    .then(({ isIosEmbedded }) => {
+      const mods: Promise<unknown>[] = [
+        import("artplayer"),
+        import("@/scripts/lib/embedded-media-fetch.js"),
+        import("@/scripts/lib/embedded-hls-tracks.js"),
+        import("@/scripts/lib/embedded-hls-audio.js"),
+      ]
+      if (!isIosEmbedded()) {
+        mods.push(import("hls.js"))
+      }
+      return Promise.all(mods)
+    })
+    .catch(() => {})
+}, 800)

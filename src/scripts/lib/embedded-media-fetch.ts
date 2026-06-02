@@ -32,7 +32,12 @@ export function clearEmbeddedMediaFetchContext(): void {
 }
 
 export function shouldUseProviderFetchForMedia(): boolean {
-  return isTauri
+  if (!isTauri) return false
+  // In Tauri dev mode the Vite proxy at /__stream is reachable from the WebView
+  // (the app connects to localhost:4321). Route HLS through the proxy instead of
+  // the Tauri HTTP plugin IPC — gives the same speed as the web browser version.
+  if (useDevStreamProxy()) return false
+  return true
 }
 
 export function resolveMediaHeaders(url: string): Headers {
@@ -123,6 +128,11 @@ export async function createEmbeddedHlsConfig(): Promise<Record<string, unknown>
     enableWorker: !devProxy && !isIosEmbedded(),
     enableWebVTT: true,
     renderTextTracksNatively: false,
+    lowLatencyMode: true,
+    startFragPrefetch: true,
+    liveSyncDurationCount: 2,
+    liveMaxLatencyDurationCount: 5,
+    backBufferLength: 30,
   }
 
   if (tauriMedia) {

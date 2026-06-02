@@ -1,6 +1,6 @@
 // @ts-nocheck - migrated to TS shell; strict typing pending follow-up
 // Movie detail page (route: /movies/detail?id=<vod_id>)
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   loadCreds,
   getActiveEntry,
@@ -48,8 +48,13 @@ import { t, initI18n } from "@/scripts/lib/i18n.js"
 import { mountPlayer, getExternalLauncher } from "@/scripts/lib/player-runtime.ts"
 import { getPlayerBackend, getUserAgent } from "@/scripts/lib/app-settings.js"
 import { setEmbeddedMediaFetchContext } from "@/scripts/lib/embedded-media-fetch.js"
+import { isTauriEmbedded } from "@/scripts/lib/stream-proxy"
 import { toast } from "@/scripts/lib/toast.js"
 import { setupExternalPlayerButton, surfaceLaunchError } from "@/scripts/lib/external-player-button.ts"
+import {
+  setResumePosition,
+  setStreamStatus,
+} from "@/scripts/lib/stream-state-cache"
 
 const VOD_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -85,9 +90,49 @@ let creds = { host: "", port: "", user: "", pass: "" }
 let movie = null
 let detailSrc = ""
 let detailSrcBuilder = null
+const vodDebugEnabled =
+  Boolean(import.meta.env.DEV) ||
+  isTauriEmbedded() ||
+  urlParams.get("debug") === "1" ||
+  (() => {
+    try { return localStorage.getItem("xt_vod_debug") === "1" } catch { return false }
+  })()
+let vodDebugEl = null
 
 const setAmbient = (url) => setAmbientOn(ambientEl, url)
 const paintPoster = (name, logo) => paintPosterOn(posterEl, name, logo)
+
+function appendVodDebug(label, detail = null) {
+  if (!vodDebugEnabled) return
+  if (!vodDebugEl) {
+    vodDebugEl = document.createElement("pre")
+    vodDebugEl.id = "movie-detail-vod-debug"
+    vodDebugEl.className =
+      "mt-3 max-h-56 overflow-auto rounded-lg border border-line bg-surface-2 p-3 text-2xs leading-relaxed text-fg-2 whitespace-pre-wrap"
+    vodDebugEl.textContent = ""
+    playerWrap?.insertAdjacentElement("afterend", vodDebugEl)
+  }
+  const time = new Date().toLocaleTimeString()
+  const formatted =
+    detail == null
+      ? ""
+      : typeof detail === "string"
+        ? ` ${redactUrl(detail)}`
+        : ` ${JSON.stringify(detail, (_key, value) => (
+            typeof value === "string" ? redactUrl(value) : value
+          ))}`
+  vodDebugEl.textContent += `[${time}] ${label}${formatted}\n`
+  vodDebugEl.scrollTop = vodDebugEl.scrollHeight
+}
+
+if (vodDebugEnabled) {
+  document.addEventListener("xt:player-source-prepared", (event) => {
+    appendVodDebug("player source prepared", event.detail || null)
+  })
+  document.addEventListener("xt:vod-source-choice", (event) => {
+    appendVodDebug("vod source choice", event.detail || null)
+  })
+}
 
 // Xtream `youtube_trailer` can be either a bare 11-char video ID or a full
 // URL. Normalize to a watchable youtube.com URL or "" if the value isn't
@@ -333,6 +378,7 @@ async function ensureEmbeddedPlayer(backend) {
 
 async function startPlayback() {
   if (!movie) return
+  appendVodDebug("play requested", { movieId, title: movie.name || "" })
 
   // detailSrc may not be ready yet if the network fetch is in flight.
   let waited = 0
@@ -341,14 +387,19 @@ async function startPlayback() {
     waited += 100
   }
   if (!detailSrc) {
+    appendVodDebug("no detailSrc after wait")
     if (plotEl) plotEl.textContent = t("detail.error.noStream")
     return
   }
 
   // Probe the URL against the configured backup domains
   if (detailSrcBuilder) {
+    appendVodDebug("resolving stream candidate", detailSrc)
     const resolved = await resolveStreamUrl(detailSrcBuilder)
-    if (resolved) detailSrc = resolved
+    if (resolved) {
+      detailSrc = resolved
+      appendVodDebug("resolved stream candidate", detailSrc)
+    }
   }
 
   if (activePlaylistId) {
@@ -372,6 +423,7 @@ async function startPlayback() {
       : 0
 
   const backend = getPlayerBackend()
+  appendVodDebug("selected backend", backend)
 
   if (backend === "mpv" || backend === "vlc") {
     try {
@@ -388,7 +440,10 @@ async function startPlayback() {
   videoEl?.removeAttribute("hidden")
 
   const player = await ensureEmbeddedPlayer(backend)
-  if (!player) return
+  if (!player) {
+    appendVodDebug("embedded player unavailable")
+    return
+  }
   setupPipButton(player)
   try {
     setEmbeddedMediaFetchContext({
@@ -397,13 +452,71 @@ async function startPlayback() {
     })
   } catch {}
   const mime = chooseMime(playSrc)
+  appendVodDebug("embedded src", { playSrc, mime })
+
+  const debugPlayerEvent = (eventName) => {
+    if (!vodDebugEnabled) return
+    const root = player.el?.()
+    const video = root?.querySelector?.("video") || root
+    const mediaError = video?.error || player.error?.()
+    const audioTracks = video?.audioTracks
+    const textTracks = video?.textTracks
+    appendVodDebug(`player:${eventName}`, {
+      readyState: video?.readyState ?? null,
+      networkState: video?.networkState ?? null,
+      currentSrc: video?.currentSrc || video?.src || "",
+      errorCode: mediaError?.code || 0,
+      errorMessage: mediaError?.message || "",
+      audioTracks:
+        audioTracks == null
+          ? null
+          : Array.from({ length: audioTracks.length }, (_unused, index) => {
+              const track = audioTracks[index]
+              return {
+                index,
+                id: track?.id || "",
+                label: track?.label || "",
+                language: track?.language || "",
+                enabled: Boolean(track?.enabled),
+              }
+            }),
+      textTracks:
+        textTracks == null
+          ? null
+          : Array.from({ length: textTracks.length }, (_unused, index) => {
+              const track = textTracks[index]
+              return {
+                index,
+                id: track?.id || "",
+                kind: track?.kind || "",
+                label: track?.label || "",
+                language: track?.language || "",
+                mode: track?.mode || "",
+              }
+            }),
+    })
+  }
+  for (const eventName of ["loadstart", "loadedmetadata", "canplay", "playing", "waiting", "stalled"]) {
+    player.one(eventName, () => debugPlayerEvent(eventName))
+  }
+  player.one("playing", () => setStreamStatus(playSrc, "online"))
   player.one("error", () => {
     const e = player.error()
+    const root = player.el?.()
+    const video = root?.querySelector?.("video") || root
+    const currentSrc = video?.currentSrc || video?.src || playSrc
+    debugPlayerEvent("error")
+    appendVodDebug("player:error", {
+      code: e?.code,
+      message: e?.message,
+      src: currentSrc,
+    })
     log.error("[xt:movie-detail] player error", {
       code: e?.code,
       message: e?.message,
-      src: playSrc,
+      src: redactUrl(currentSrc),
     })
+    setStreamStatus(playSrc, "offline")
   })
 
   if (resumePos > 0) {
@@ -432,6 +545,7 @@ async function startPlayback() {
         name: movie.name,
         logo: movie.logo || null,
       })
+      setResumePosition(playSrc, pos, dur)
     })
     player.on("ended", () => {
       if (!activePlaylistId || !movie) return
@@ -442,9 +556,10 @@ async function startPlayback() {
 
   const playResult = player.play?.()
   if (playResult && typeof playResult.catch === "function") {
-    playResult.catch((err) =>
+    playResult.catch((err) => {
+      appendVodDebug("play() rejected", String(err?.message || err))
       log.warn("[xt:movie-detail] play() rejected:", err?.message || err)
-    )
+    })
   }
 
   if (activePlaylistId && movie) {
@@ -463,12 +578,21 @@ async function startPlayback() {
 
 async function launchExternalPlayback(backend, src, resumeSeconds) {
   const launcher = getExternalLauncher(backend)
+  appendVodDebug("external launcher", {
+    backend,
+    path: launcher.path || "",
+    src,
+  })
   toast({
     title: t("settings.playback.launching", { player: backend.toUpperCase() })
       || `Launching ${backend.toUpperCase()}…`,
     duration: 2000,
   })
-  await launcher.launch(src, { resumeSeconds })
+  return launcher.launch(src, {
+    resumeSeconds,
+    userAgent: getUserAgent() || null,
+    referer: creds.host ? `${fmtBase(creds.host, creds.port)}/` : null,
+  })
 }
 
 playBtn?.addEventListener("click", startPlayback)

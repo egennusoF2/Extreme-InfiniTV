@@ -11,10 +11,29 @@ import {
   getCurrentLevelCodecString,
   levelCodecsHaveMuxedAudio,
 } from "@/scripts/lib/embedded-hls-audio"
+import {
+  clearTrackPreference,
+  findPreferredTrackIndex,
+  saveTrackPreference,
+} from "@/scripts/lib/media-track-preferences"
 
 const SETTING_AUDIO = "xt-hls-audio"
 const SETTING_SUBTITLE = "xt-hls-subtitle"
 const NO_AUDIO_CHECK_MS = 4500
+
+function writeHlsDebug(detail: unknown): void {
+  if (!import.meta.env.DEV) return
+  try {
+    let node = document.getElementById("xt-hls-debug-log")
+    if (!node) {
+      node = document.createElement("script")
+      node.id = "xt-hls-debug-log"
+      node.type = "application/json"
+      document.body.appendChild(node)
+    }
+    node.textContent = JSON.stringify(detail)
+  } catch {}
+}
 
 function audioTrackLabel(
   track: { name?: string; lang?: string; groupId?: string; codec?: string },
@@ -39,6 +58,38 @@ function currentLevelAudioCodec(hls: {
   return getCurrentLevelCodecString(hls)
 }
 
+function shortTrackHint(value: string): string {
+  const clean = String(value || "").replace(/\s+/g, " ").trim()
+  if (!clean) return ""
+  return clean.length > 28 ? `${clean.slice(0, 25)}...` : clean
+}
+
+function settingTitle(title: string, hint: string): string {
+  const compact = shortTrackHint(hint)
+  return compact
+    ? `${title} <span class="opacity-70 text-2xs">· ${compact}</span>`
+    : title
+}
+
+function applyPreferredHlsTracks(hls: any, opts: { audio?: boolean; subtitle?: boolean } = {}): void {
+  if (!hls) return
+  if (opts.audio !== false) {
+    const audioIndex = findPreferredTrackIndex("audio", hls.audioTracks || [])
+    if (audioIndex >= 0 && hls.audioTrack !== audioIndex) {
+      hls.audioTrack = audioIndex
+      log.log("[xt:player] HLS preferred audio", audioIndex)
+    }
+  }
+  if (opts.subtitle !== false) {
+    const subtitleIndex = findPreferredTrackIndex("subtitle", hls.subtitleTracks || [])
+    if (subtitleIndex >= 0 && hls.subtitleTrack !== subtitleIndex) {
+      hls.subtitleTrack = subtitleIndex
+      hls.subtitleDisplay = true
+      log.log("[xt:player] HLS preferred subtitle", subtitleIndex)
+    }
+  }
+}
+
 export function refreshHlsTrackSettings(art: any, hls: any): void {
   if (!art?.setting || !hls) return
 
@@ -57,6 +108,10 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
   const muxedHint = levelCodecsHaveMuxedAudio(codecHint)
     ? ""
     : ` · ${t("player.track.audioExternal") || "external audio"}`
+  const activeAudioLabel =
+    currentAudio === -1
+      ? embeddedLabel
+      : audioTrackLabel(audioTracks[currentAudio] || {}, currentAudio)
 
   const audioSelector: Array<{
     html: string
@@ -68,6 +123,7 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
       default: currentAudio === -1,
       onSelect() {
         hls.audioTrack = -1
+        clearTrackPreference("audio")
         enforceMuxedHlsAudio(hls)
         ensureVideoAudible(art.video, art)
         log.log("[xt:player] HLS audio: muxed main stream")
@@ -82,6 +138,7 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
         default: currentAudio === index,
         onSelect() {
           hls.audioTrack = index
+          saveTrackPreference("audio", track)
           ensureVideoAudible(art.video, art)
           log.log("[xt:player] HLS audio alternate", index, track)
         },
@@ -98,12 +155,17 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
 
   art.setting.add({
     name: SETTING_AUDIO,
-    html: t("player.menu.audio") || "Audio",
+    html: settingTitle(t("player.menu.audio") || "Audio", activeAudioLabel),
     width: 280,
     selector: audioSelector,
   })
 
   const subtitleTracks = hls.subtitleTracks || []
+  const currentSubtitle = hls.subtitleTrack ?? -1
+  const activeSubtitleLabel =
+    currentSubtitle === -1
+      ? t("player.subtitle.off") || "Off"
+      : subtitleTrackLabel(subtitleTracks[currentSubtitle] || {}, currentSubtitle)
   const subtitleSelector: Array<{
     html: string
     default?: boolean
@@ -111,19 +173,21 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
   }> = [
     {
       html: t("player.subtitle.off") || "Off",
-      default: (hls.subtitleTrack ?? -1) === -1,
+      default: currentSubtitle === -1,
       onSelect() {
         hls.subtitleTrack = -1
         hls.subtitleDisplay = false
+        clearTrackPreference("subtitle")
       },
     },
     ...subtitleTracks.map(
       (track: { name?: string; lang?: string; id?: string }, index: number) => ({
         html: subtitleTrackLabel(track, index),
-        default: hls.subtitleTrack === index,
+        default: currentSubtitle === index,
         onSelect() {
           hls.subtitleTrack = index
           hls.subtitleDisplay = true
+          saveTrackPreference("subtitle", track)
         },
       }),
     ),
@@ -138,7 +202,7 @@ export function refreshHlsTrackSettings(art: any, hls: any): void {
 
   art.setting.add({
     name: SETTING_SUBTITLE,
-    html: t("player.menu.subtitle") || "Subtitles",
+    html: settingTitle(t("player.menu.subtitle") || "Subtitles", activeSubtitleLabel),
     width: 280,
     selector: subtitleSelector,
   })
@@ -149,6 +213,22 @@ declare const __XT_PLAYBACK_BUILD__: string | undefined
 export interface WireHlsOptions {
   /** Live TV: auto-pick muxed/AAC audio. VOD: expose tracks, minimal auto-switching. */
   live?: boolean
+}
+
+function nudgeLiveToEdge(video: HTMLVideoElement): void {
+  try {
+    if (video.currentTime > 0.5) return
+    const seekable = video.seekable
+    if (!seekable || seekable.length === 0) return
+    const end = seekable.end(seekable.length - 1)
+    const start = seekable.start(seekable.length - 1)
+    if (!Number.isFinite(end) || end <= 0) return
+    video.currentTime = Math.max(start, end - 12)
+    const playPromise = video.play?.()
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {})
+    }
+  } catch {}
 }
 
 export function wireHlsForArtplayer(
@@ -162,8 +242,12 @@ export function wireHlsForArtplayer(
   const isLive = options.live !== false
 
   if (import.meta.env.DEV) {
+    try {
+      ;(window as any).__xtLastHls = hls
+    } catch {}
     log.log("[xt:player] playback build", __XT_PLAYBACK_BUILD__ || "unknown")
   }
+  writeHlsDebug({ event: "attached", live: isLive })
 
   art.hls = hls
   let noAudioCheckTimer: ReturnType<typeof setTimeout> | null = null
@@ -216,12 +300,23 @@ export function wireHlsForArtplayer(
 
   const onTracksUpdated = () => {
     noAudioDispatched = false
+    if (!isLive) applyPreferredHlsTracks(hls)
     syncAudio()
     refreshHlsTrackSettings(art, hls)
   }
 
   hls.on(Hls.Events.MANIFEST_PARSED, (_event: string, data: unknown) => {
+    writeHlsDebug({
+      event: "manifest",
+      levels: hls.levels?.map((level: { codecs?: string; audioCodec?: string; videoCodec?: string }) => ({
+        codecs: level.codecs,
+        audioCodec: level.audioCodec,
+        videoCodec: level.videoCodec,
+      })),
+      audioTracks: hls.audioTracks,
+    })
     noAudioDispatched = false
+    if (!isLive) applyPreferredHlsTracks(hls)
     syncAudio()
     notifyIfAudioCodecUnsupported(
       codecsFromHlsManifest(data as { levels?: Array<{ codecs?: string; audioCodec?: string }> }),
@@ -249,8 +344,73 @@ export function wireHlsForArtplayer(
     refreshHlsTrackSettings(art, hls)
   })
 
-  hls.on(Hls.Events.ERROR, (_event: string, data: { type?: string; details?: string }) => {
+  hls.on(Hls.Events.FRAG_LOADED, (_event: string, data: { frag?: { url?: string; sn?: number | string } }) => {
+    writeHlsDebug({
+      event: "frag-loaded",
+      sn: data?.frag?.sn,
+      url: data?.frag?.url?.replace(/\/hls\/[^/]+\//i, "/hls/***/"),
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      buffered: Array.from({ length: video.buffered.length }, (_unused, index) => [
+        video.buffered.start(index),
+        video.buffered.end(index),
+      ]),
+    })
+  })
+
+  hls.on(Hls.Events.BUFFER_APPENDED, () => {
+    if (isLive) nudgeLiveToEdge(video)
+    writeHlsDebug({
+      event: "buffer-appended",
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      buffered: Array.from({ length: video.buffered.length }, (_unused, index) => [
+        video.buffered.start(index),
+        video.buffered.end(index),
+      ]),
+    })
+  })
+
+  hls.on(Hls.Events.ERROR, (_event: string, data: { type?: string; details?: string; fatal?: boolean }) => {
     const details = data?.details || ""
+    if (import.meta.env.DEV) {
+      log.warn("[xt:player] HLS error", {
+        type: data?.type,
+        details,
+        fatal: data?.fatal,
+        currentTime: video.currentTime,
+        readyState: video.readyState,
+        networkState: video.networkState,
+      })
+    }
+    try {
+      window.dispatchEvent(
+        new CustomEvent("xt:hls-debug-error", {
+          detail: {
+            type: data?.type,
+            details,
+            fatal: data?.fatal,
+            currentTime: video.currentTime,
+            readyState: video.readyState,
+            networkState: video.networkState,
+          },
+        }),
+      )
+    } catch {}
+    writeHlsDebug({
+      event: "error",
+      type: data?.type,
+      details,
+      fatal: data?.fatal,
+      currentTime: video.currentTime,
+      readyState: video.readyState,
+      networkState: video.networkState,
+      levels: hls.levels?.map((level: { codecs?: string; audioCodec?: string }) => ({
+        codecs: level.codecs,
+        audioCodec: level.audioCodec,
+      })),
+      audioTracks: hls.audioTracks,
+    })
     const codecRelated =
       /bufferAppendError|bufferIncompatibleCodecsError|manifestIncompatibleCodecsError/i.test(
         details,
@@ -262,6 +422,16 @@ export function wireHlsForArtplayer(
         dispatchHlsNoAudioDetected({ reason: details })
       }
     }
+    if (!data?.fatal) return
+    try {
+      if (/media/i.test(data.type || "")) {
+        hls.recoverMediaError?.()
+        return
+      }
+      if (/network/i.test(data.type || "")) {
+        hls.startLoad?.()
+      }
+    } catch {}
   })
 
   if (isLive) {

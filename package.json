@@ -59,6 +59,7 @@
     "hls.js": "^1.6.16",
     "marked": "^18.0.3",
     "mpegts.js": "^1.8.0",
+    "shaka-player": "^5.1.7",
     "svelte": "^5.55.7",
     "tailwindcss": "^4.3.0",
     "tauri-plugin-android-fs-api": "28.1.0",

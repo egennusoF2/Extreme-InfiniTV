@@ -1,5 +1,10 @@
 import { log } from "@/scripts/lib/log.js"
 import { t } from "@/scripts/lib/i18n.js"
+import {
+  clearTrackPreference,
+  findPreferredTrackIndex,
+  saveTrackPreference,
+} from "@/scripts/lib/media-track-preferences"
 
 const SETTING_AUDIO = "xt-native-audio"
 const SETTING_SUBTITLE = "xt-native-subtitle"
@@ -13,6 +18,12 @@ function refreshNativeAudioSettings(art: any, video: HTMLVideoElement): void {
   } catch {}
 
   const selector: Array<{ html: string; default?: boolean; onSelect?: () => void }> = []
+  const preferred = findPreferredTrackIndex("audio", tracks)
+  if (preferred >= 0) {
+    for (let j = 0; j < tracks.length; j++) {
+      tracks[j].enabled = j === preferred
+    }
+  }
   for (let i = 0; i < tracks.length; i++) {
     const track = tracks[i]
     const label =
@@ -25,6 +36,7 @@ function refreshNativeAudioSettings(art: any, video: HTMLVideoElement): void {
         for (let j = 0; j < tracks.length; j++) {
           tracks[j].enabled = j === i
         }
+        saveTrackPreference("audio", track)
         log.log("[xt:player] native audio track", i, label)
       },
     })
@@ -47,6 +59,13 @@ function refreshNativeSubtitleSettings(art: any, video: HTMLVideoElement): void 
   const subtitleTracks = textTracks.filter(
     (tr) => tr.kind === "subtitles" || tr.kind === "captions",
   )
+  const preferred = findPreferredTrackIndex("subtitle", subtitleTracks)
+  if (preferred >= 0) {
+    for (const tr of textTracks) {
+      tr.mode = "disabled"
+    }
+    subtitleTracks[preferred].mode = "showing"
+  }
 
   const selector: Array<{ html: string; default?: boolean; onSelect?: () => void }> = [
     {
@@ -56,6 +75,7 @@ function refreshNativeSubtitleSettings(art: any, video: HTMLVideoElement): void 
         for (const tr of textTracks) {
           tr.mode = "disabled"
         }
+        clearTrackPreference("subtitle")
       },
     },
     ...subtitleTracks.map((track, index) => ({
@@ -68,6 +88,7 @@ function refreshNativeSubtitleSettings(art: any, video: HTMLVideoElement): void 
           tr.mode = "disabled"
         }
         track.mode = "showing"
+        saveTrackPreference("subtitle", track)
         log.log("[xt:player] native subtitle track", index, track.label)
       },
     })),

@@ -23,15 +23,18 @@ export function isAppleEmbedded(): boolean {
   return (
     /\b(iPad|iPhone|iPod)\b/i.test(ua) ||
     /\bMacintosh\b/i.test(ua) ||
-    /\bMac\b/i.test(platform)
+    /^Mac/i.test(platform)
   )
 }
 
-/** True when Astro/Vite dev server stream proxy should be used (browser @ localhost). */
+/** True when Astro/Vite dev server stream proxy should be used. */
 export function useDevStreamProxy(): boolean {
   if (typeof window === "undefined") return false
-  if (isTauri) return false
+  // In dev mode, both browser and Tauri can reach the Vite proxy at /__stream.
+  // Tauri dev connects to localhost:4321, so the proxy is always reachable.
+  // Production Tauri builds don't have the Vite server → proxy unavailable.
   if (import.meta.env.DEV) return true
+  if (isTauri) return false
   try {
     const host = window.location?.hostname || ""
     return host === "localhost" || host === "127.0.0.1" || host === "[::1]"
@@ -83,7 +86,23 @@ export function httpFallbackStreamUrl(url: string): string | null {
  * - :8080 etc.: leave scheme as-is
  */
 function isXtreamVodPath(pathname: string): boolean {
-  return /\/(movie|series)\//i.test(pathname)
+  // Live paths are also served over plain HTTP on most Xtream panels;
+  // upgrading to HTTPS causes silent connection failures and infinite retries.
+  return /\/(movie|series|live)\//i.test(pathname)
+}
+
+/** Xtream media endpoints often advertise HTTPS but only stream reliably over HTTP. */
+export function preferPlainHttpForXtreamMedia(url: string): string {
+  if (!url) return url
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === "https:" && isXtreamVodPath(parsed.pathname)) {
+      parsed.protocol = "http:"
+      if (parsed.port === "443") parsed.port = ""
+      return parsed.href
+    }
+  } catch {}
+  return url
 }
 
 export function preferHttpsStreamUrl(url: string): string {
@@ -180,6 +199,29 @@ export function wrapStreamUrlForDev(url: string): string {
   }
 }
 
+export function useNativeStreamProxy(): boolean {
+  return isTauriEmbedded() && !useDevStreamProxy()
+}
+
+export async function resolveNativeStreamProxyUrl(url: string): Promise<string> {
+  if (!useNativeStreamProxy()) return url
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const { getUserAgent } = await import("@/scripts/lib/app-settings.js")
+    let referer = ""
+    try {
+      referer = `${new URL(url).origin}/`
+    } catch {}
+    return await invoke<string>("media_proxy_url", {
+      url,
+      userAgent: getUserAgent() || undefined,
+      referer: referer || undefined,
+    })
+  } catch {
+    return url
+  }
+}
+
 /** True for HLS/MPEG-TS media URLs (not player_api, xmltv, images). */
 export function isIptvMediaUrl(url: string): boolean {
   try {
@@ -212,13 +254,13 @@ export function devProxyFetchHeaders(mediaHeaders: Headers): HeadersInit {
 }
 
 /**
- * When false, ArtPlayer uses native <video src> for .m3u8 (Safari / iOS browser).
- * Apple WebKit (macOS/iOS app included) should stay native: it has HLS built in,
- * while hls.js/MSE is unavailable or fragile there. Other Tauri WebViews keep
- * hls.js, backed by a provider-fetch loader for CORS/header-sensitive streams.
+ * When false, ArtPlayer uses native <video src> for .m3u8.
+ * iOS must stay native because WKWebView has no usable MSE path for hls.js.
+ * macOS Tauri should use hls.js: it exposes audio/subtitle tracks reliably and
+ * avoids the slow/opaque native HLS startup path.
  */
 export function shouldUseHlsJsForM3u8(): boolean {
-  if (isAppleEmbedded()) return false
+  if (isIosEmbedded()) return false
   if (isTauriEmbedded()) return true
   if (typeof navigator === "undefined") return true
   const ua = navigator.userAgent || ""

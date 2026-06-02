@@ -14,7 +14,7 @@
 // Desktop only - external backends invoke a Tauri command that's gated
 // off on Android/iOS at the Rust side.
 
-import { log } from "@/scripts/lib/log.js"
+import { log, redactUrl } from "@/scripts/lib/log.js"
 import {
   getPlayerBackend,
   getPlayerPath,
@@ -23,6 +23,12 @@ import {
   getUserAgent,
   EXTERNAL_PLAYER_BACKENDS,
 } from "@/scripts/lib/app-settings.js"
+import { resolveNativeStreamProxyUrl } from "@/scripts/lib/stream-proxy"
+import {
+  probeStreamKind,
+  streamKindFromUrl,
+  type StreamKind as ProbedStreamKind,
+} from "@/scripts/lib/stream-probe.js"
 
 export type PlayerBackend = "videojs" | "artplayer" | "mpv" | "vlc"
 export type ExternalPlayerKind = "mpv" | "vlc"
@@ -99,6 +105,17 @@ export const androidExternalAvailable =
   typeof window !== "undefined" &&
   !!(window as any).AndroidIntent
 
+function defaultExternalPlayerPath(kind: ExternalPlayerKind): string {
+  if (typeof navigator === "undefined") return ""
+  const platform = navigator.platform || ""
+  const ua = navigator.userAgent || ""
+  const isMac = /^Mac/i.test(platform) || /\bMacintosh\b/i.test(ua)
+  if (!isMac) return ""
+  if (kind === "vlc") return "/Applications/VLC.app/Contents/MacOS/VLC"
+  if (kind === "mpv") return "/Applications/mpv.app/Contents/MacOS/mpv"
+  return ""
+}
+
 let invokePromise: Promise<((cmd: string, args: unknown) => Promise<unknown>) | null> | null = null
 async function getInvoke() {
   if (!externalPlayersAvailable) return null
@@ -148,7 +165,6 @@ export function buildMpvArgs(input: ArgvInput): string[] {
 export function buildVlcArgs(input: ArgvInput): string[] {
   const minResume = input.resumeMinSeconds ?? RESUME_MIN_SECONDS_DEFAULT
   const out: string[] = [
-    "--no-qt-minimal-view",
     "--no-fullscreen",
     "--no-qt-error-dialogs",
     "--play-and-exit",
@@ -205,7 +221,7 @@ export function classifyError(raw: unknown, kind: ExternalPlayerKind, path: stri
 }
 
 export function getExternalLauncher(kind: ExternalPlayerKind): ExternalLauncher {
-  const path = getPlayerPath(kind)
+  const path = getPlayerPath(kind) || defaultExternalPlayerPath(kind)
   return {
     kind,
     path,
@@ -537,73 +553,16 @@ export async function detectPlayer(
 type StreamKind = "hls" | "dash" | "ts" | "native"
 
 function streamKindHint(src: string, type?: string): StreamKind | "unknown" {
-  // URL extension wins: Live TV callers pass a stock
-  // "application/x-mpegURL" MIME regardless of the real container, so
-  // a contradicting extension overrides the MIME.
-  if (/\.m3u8(\?|$)/i.test(src)) return "hls"
-  if (/\.mpd(\?|$)/i.test(src)) return "dash"
-  if (/\.ts(\?|$)/i.test(src)) return "ts"
-  if (/\.(mp4|m4v|mkv|webm|mov|avi|m4a|mp3|aac|flac|ogg)(\?|$)/i.test(src)) return "native"
-
-  const mime = (type || "").toLowerCase()
-  if (mime.includes("dash+xml")) return "dash"
-  if (mime.includes("mpegurl") || mime.includes("m3u8")) return "hls"
-  if (mime === "video/mp2t" || mime === "video/mpeg") return "ts"
-  if (mime.startsWith("video/") || mime.startsWith("audio/")) return "native"
-  return "unknown"
+  return normalizeProbedKind(streamKindFromUrl(src, type))
 }
 
-const containerProbeCache = new Map<string, StreamKind>()
+function normalizeProbedKind(kind: ProbedStreamKind | "unknown"): StreamKind | "unknown" {
+  return kind === "hls-vod" ? "hls" : kind
+}
 
 async function probeContainer(src: string): Promise<StreamKind> {
-  let origin: string
-  try {
-    origin = new URL(src).origin
-  } catch {
-    return "hls"
-  }
-  const cached = containerProbeCache.get(origin)
-  if (cached) return cached
-  try {
-    const { providerFetch } = await import("@/scripts/lib/provider-fetch.js")
-    const controller =
-      typeof AbortController !== "undefined" ? new AbortController() : null
-    const timer = controller ? setTimeout(() => controller.abort(), 4000) : null
-    let kind: StreamKind = "hls"
-    try {
-      const response = await providerFetch(src, {
-        method: "GET",
-        headers: { Range: "bytes=0-0" },
-        signal: controller?.signal,
-      })
-      const contentType = (response.headers.get("content-type") || "").toLowerCase()
-      if (contentType.includes("dash+xml") || contentType.includes("mpd")) {
-        kind = "dash"
-      } else if (contentType.includes("mpegurl") || contentType.includes("m3u8")) {
-        kind = "hls"
-      } else if (
-        contentType.includes("mp2t") ||
-        contentType.includes("mpeg-ts") ||
-        contentType.includes("mpegts")
-      ) {
-        kind = "ts"
-      } else if (
-        contentType.startsWith("video/") ||
-        contentType.startsWith("audio/")
-      ) {
-        kind = "native"
-      }
-      try {
-        response.body?.cancel?.()
-      } catch {}
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
-    containerProbeCache.set(origin, kind)
-    return kind
-  } catch {
-    return "hls"
-  }
+  const kind = normalizeProbedKind(await probeStreamKind(src))
+  return kind === "unknown" ? "hls" : kind
 }
 
 interface MpegtsHandle {
@@ -612,6 +571,19 @@ interface MpegtsHandle {
 
 interface DashHandle {
   destroy: () => void
+}
+
+interface ShakaHandle {
+  destroy: () => Promise<void> | void
+}
+
+function shouldUseShakaForAdaptive(kind: StreamKind | "unknown", isLive: boolean): boolean {
+  if (kind !== "hls" && kind !== "dash") return false
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("shaka") === "1") return true
+  } catch {}
+  return !isLive
 }
 
 async function attachDash(
@@ -861,6 +833,18 @@ async function mountVideoJs(
           playUrl = await preferVodHlsUrl(src)
         }
         if (pendingSrc !== src) return
+        if (streamKindHint(playUrl, type) === "native") {
+          const { resolveEmbeddedStreamUrl } = await import(
+            "@/scripts/lib/embedded-media-fetch.js"
+          )
+          const resolvedNativeUrl = await resolveNativeStreamProxyUrl(
+            resolveEmbeddedStreamUrl(playUrl),
+          )
+          if (pendingSrc !== src) return
+          pendingSrc = resolvedNativeUrl
+          loadNative(resolvedNativeUrl, type)
+          return
+        }
         pendingSrc = playUrl
         loadFromResolvedUrl(playUrl, type)
       })()
@@ -1032,7 +1016,10 @@ async function mountArtPlayer(
   let activeHls: { destroy: () => void } | null = null
   let activeMpegts: MpegtsHandle | null = null
   let activeDash: DashHandle | null = null
+  let activeShaka: ShakaHandle | null = null
   let pendingSrc: string | null = null
+  let pendingVodFallbackUrl: string | null = null
+  let pendingLoad: Promise<void> | null = null
   let loadGeneration = 0
 
   function destroyActiveEmbeddedHandles() {
@@ -1047,6 +1034,10 @@ async function mountArtPlayer(
     if (activeDash) {
       try { activeDash.destroy() } catch {}
       activeDash = null
+    }
+    if (activeShaka) {
+      try { void activeShaka.destroy() } catch {}
+      activeShaka = null
     }
   }
 
@@ -1069,19 +1060,47 @@ async function mountArtPlayer(
     fullscreenWeb: true,
     miniProgressBar: !isLive,
     mutex: true,
+    contextmenu: [],
     backdrop: false,
     playsInline: true,
     customType: {
       async m3u8(video, url) {
         destroyActiveEmbeddedHandles()
+        const vodFallbackUrl = !isLive ? pendingVodFallbackUrl : null
+        const fallbackToVodContainer = () => {
+          if (!vodFallbackUrl || isLive) return false
+          log.warn("[xt:player] HLS VOD failed; falling back to container", {
+            hls: redactUrl(url).slice(0, 120),
+            fallback: redactUrl(vodFallbackUrl).slice(0, 120),
+          })
+          destroyActiveEmbeddedHandles()
+          art.hls = null
+          video.src = vodFallbackUrl
+          try { video.load() } catch {}
+          return true
+        }
         const { shouldUseHlsJsForM3u8 } = await import(
           "@/scripts/lib/stream-proxy.js"
         )
+        if (shouldUseShakaForAdaptive("hls", isLive)) {
+          try {
+            const { attachShaka } = await import("@/scripts/lib/embedded-shaka-tracks.js")
+            const { resolveEmbeddedStreamUrl } = await import(
+              "@/scripts/lib/embedded-media-fetch.js"
+            )
+            activeShaka = await attachShaka(art, video, resolveEmbeddedStreamUrl(url), { live: isLive })
+            return
+          } catch (error) {
+            log.warn("[xt:player] Shaka HLS failed; falling back to hls.js", error)
+            if (fallbackToVodContainer()) return
+          }
+        }
         if (!shouldUseHlsJsForM3u8()) {
           const { resolveEmbeddedStreamUrl } = await import(
             "@/scripts/lib/embedded-media-fetch.js"
           )
           video.src = resolveEmbeddedStreamUrl(url)
+          video.addEventListener("error", fallbackToVodContainer, { once: true })
           return
         }
         try {
@@ -1099,6 +1118,12 @@ async function mountArtPlayer(
               "@/scripts/lib/embedded-hls-audio.js"
             )
             wireHlsForArtplayer(art, hls, video, { live: isLive })
+            const HlsEvents = (Hls as any).Events
+            if (HlsEvents?.ERROR) {
+              hls.on(HlsEvents.ERROR, (_event: string, data: { fatal?: boolean }) => {
+                if (data?.fatal) fallbackToVodContainer()
+              })
+            }
             const { resolveEmbeddedStreamUrl } = await import(
               "@/scripts/lib/embedded-media-fetch.js"
             )
@@ -1113,6 +1138,7 @@ async function mountArtPlayer(
         } catch (error) {
           log.warn("[xt:player] hls.js import failed; falling back to <video src>", error)
         }
+        if (fallbackToVodContainer()) return
         log.warn("[xt:player] hls.js unsupported and no native HLS; fallback to <video src>")
         video.src = url
       },
@@ -1131,6 +1157,15 @@ async function mountArtPlayer(
       },
       async mpd(video, url) {
         destroyActiveEmbeddedHandles()
+        if (shouldUseShakaForAdaptive("dash", isLive)) {
+          try {
+            const { attachShaka } = await import("@/scripts/lib/embedded-shaka-tracks.js")
+            activeShaka = await attachShaka(art, video, url, { live: isLive })
+            return
+          } catch (error) {
+            log.warn("[xt:player] Shaka DASH failed; falling back to dash.js", error)
+          }
+        }
         const handle = await attachDash(video, url)
         if (!handle) {
           video.src = url
@@ -1155,7 +1190,7 @@ async function mountArtPlayer(
   )
   wireNativeTracksForArtplayer(art)
 
-  async function loadArtSrc(src: string, type?: string) {
+  async function loadArtSrc(src: string, type?: string): Promise<void> {
     const generation = ++loadGeneration
     pendingSrc = src
     destroyActiveEmbeddedHandles()
@@ -1171,9 +1206,26 @@ async function mountArtPlayer(
     const { resolveEmbeddedStreamUrl } = await import(
       "@/scripts/lib/embedded-media-fetch.js"
     )
-    const resolvedUrl = resolveEmbeddedStreamUrl(playUrl)
-
     const hint = streamKindHint(playUrl, type)
+    const resolvedUrl =
+      hint === "native"
+        ? await resolveNativeStreamProxyUrl(resolveEmbeddedStreamUrl(playUrl))
+        : resolveEmbeddedStreamUrl(playUrl)
+    pendingVodFallbackUrl =
+      !isLive && playUrl !== src ? resolveEmbeddedStreamUrl(src) : null
+    try {
+      document.dispatchEvent(
+        new CustomEvent("xt:player-source-prepared", {
+          detail: {
+            originalUrl: redactUrl(src),
+            playUrl: redactUrl(playUrl),
+            resolvedUrl: redactUrl(resolvedUrl),
+            changed: playUrl !== src,
+          },
+        }),
+      )
+    } catch {}
+
     if (hint === "hls") {
       art.type = "m3u8"
       art.url = resolvedUrl
@@ -1192,29 +1244,63 @@ async function mountArtPlayer(
     if (hint === "native") {
       art.type = ""
       art.url = resolvedUrl
+      if (!isLive) {
+        import("@/scripts/lib/embedded-vod-subtitles.js")
+          .then(({ attachExtractedVodSubtitles }) =>
+            attachExtractedVodSubtitles(art.video, playUrl),
+          )
+          .then((count) => {
+            if (count > 0) {
+              import("@/scripts/lib/embedded-native-tracks.js").then(
+                ({ refreshNativeTrackSettings }) => {
+                  refreshNativeTrackSettings(art, art.video)
+                },
+              )
+            }
+          })
+          .catch(() => {})
+      }
       return
     }
     art.url = ""
-    probeContainer(playUrl)
-      .then((kind) => {
-        if (generation !== loadGeneration || pendingSrc !== src) return
-        art.type =
-          kind === "ts" ? "ts" : kind === "dash" ? "mpd" : kind === "native" ? "" : "m3u8"
-        art.url = resolvedUrl
-      })
-      .catch(() => {
-        if (generation !== loadGeneration || pendingSrc !== src) return
-        art.type = "m3u8"
-        art.url = resolvedUrl
-      })
+    try {
+      const kind = await probeContainer(playUrl)
+      if (generation !== loadGeneration || pendingSrc !== src) return
+      art.type =
+        kind === "ts" ? "ts" : kind === "dash" ? "mpd" : kind === "native" ? "" : "m3u8"
+      art.url = resolvedUrl
+    } catch {
+      if (generation !== loadGeneration || pendingSrc !== src) return
+      art.type = "m3u8"
+      art.url = resolvedUrl
+    }
   }
 
   const handle: VjsLikeHandle = {
     src({ src, type }) {
-      void loadArtSrc(src, type)
+      pendingLoad = loadArtSrc(src, type)
+        .catch((error) => {
+          log.warn("[xt:player] ArtPlayer source preparation failed", error)
+        })
+        .finally(() => {
+          pendingLoad = null
+        })
     },
-    play() {
-      return art.play()
+    async play() {
+      if (pendingLoad) await pendingLoad
+      // art.url triggers the async m3u8 handler (hls.js setup) but loadArtSrc
+      // resolves before it finishes. If art.play() is called while hls.js is
+      // still initialising, the video element has no source yet and play()
+      // rejects. Retry once after a short delay to cover that race window.
+      const first = art.play()
+      if (first instanceof Promise) {
+        return first.catch(async () => {
+          await new Promise<void>((r) => setTimeout(r, 400))
+          if (!art.video || !art.video.paused) return
+          return art.play()?.catch(() => {})
+        })
+      }
+      return first
     },
     pause() {
       art.pause()
@@ -1273,7 +1359,7 @@ async function mountArtPlayer(
 // ---------------------------------------------------------------------------
 export async function mountPlayer(
   videoEl: HTMLVideoElement,
-  backend: PlayerBackend = getPlayerBackend(),
+  backend: PlayerBackend = getPlayerBackend() as PlayerBackend,
   options: MountOptions = {},
 ): Promise<Mounted> {
   if (backend === "artplayer" && isAndroid) backend = "videojs"

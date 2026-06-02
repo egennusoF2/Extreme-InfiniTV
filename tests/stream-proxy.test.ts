@@ -10,13 +10,25 @@ import {
   isIptvMediaUrl,
   unwrapStreamProxyUrl,
   STREAM_PROXY_PATH,
+  preferPlainHttpForXtreamMedia,
 } from "../src/scripts/lib/stream-proxy"
 
 describe("preferHttpsStreamUrl", () => {
   it("upgrades http to https on port 80", () => {
-    expect(preferHttpsStreamUrl("http://example.com/live/a.m3u8")).toBe(
-      "https://example.com/live/a.m3u8",
+    expect(preferHttpsStreamUrl("http://example.com/hls/a.m3u8")).toBe(
+      "https://example.com/hls/a.m3u8",
     )
+  })
+
+  it("keeps Xtream media paths on their original scheme", () => {
+    const url = "http://example.com/live/u/p/1.m3u8"
+    expect(preferHttpsStreamUrl(url)).toBe(url)
+  })
+
+  it("downgrades HTTPS Xtream media paths for direct media playback", () => {
+    expect(
+      preferPlainHttpForXtreamMedia("https://example.com/movie/u/p/1.mp4"),
+    ).toBe("http://example.com/movie/u/p/1.mp4")
   })
 
   it("keeps http on non-standard ports (IPTV CDN shards)", () => {
@@ -44,8 +56,8 @@ describe("preferHttpsStreamUrl", () => {
 
 describe("wrapStreamUrlForDev", () => {
   it("upgrades http to https outside dev browser (no proxy path)", () => {
-    expect(wrapStreamUrlForDev("http://example.com/live/u/p/1.m3u8")).toBe(
-      "https://example.com/live/u/p/1.m3u8",
+    expect(wrapStreamUrlForDev("http://example.com/hls/1.m3u8")).toBe(
+      "https://example.com/hls/1.m3u8",
     )
   })
 })
