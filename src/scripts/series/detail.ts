@@ -345,69 +345,76 @@ function renderEpisodes() {
       row.classList.add("relative")
     }
 
-    if (isDownloadable()) {
-      const epUrl = buildEpisodeStreamUrl(ep)
-      if (epUrl) {
-        const dlBtn = document.createElement("button")
-        dlBtn.type = "button"
-        dlBtn.className =
-          "shrink-0 rounded-lg border border-line min-h-11 min-w-24 px-3 text-xs text-fg-2 tabular-nums " +
-          "hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg focus-visible:border-accent " +
-          "outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-        dlBtn.dataset.dlUrl = epUrl
-        const dlLabel = document.createElement("span")
-        dlLabel.dataset.dlLabel = "1"
-        dlBtn.appendChild(dlLabel)
+    const epUrl = buildEpisodeStreamUrl(ep)
+    if (epUrl) {
+      const dlBtn = document.createElement("button")
+      dlBtn.type = "button"
+      dlBtn.className =
+        "shrink-0 rounded-lg border border-line min-h-11 min-w-24 px-3 text-xs text-fg-2 tabular-nums " +
+        "hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg focus-visible:border-accent " +
+        "outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+      dlBtn.dataset.dlUrl = epUrl
+      const dlLabel = document.createElement("span")
+      dlLabel.dataset.dlLabel = "1"
+      dlBtn.appendChild(dlLabel)
+      if (isDownloadable()) {
         applyDownloadButtonState(dlBtn, findDownloadByUrl(epUrl))
-        dlBtn.addEventListener("click", async (e) => {
-          e.stopPropagation()
-          const existing = findDownloadByUrl(epUrl)
-          if (existing?.status === "downloading" || existing?.status === "queued") {
-            pauseDownload(existing.id)
-            return
-          }
-          if (
-            existing &&
-            (existing.status === "paused" ||
-              existing.status === "stalled" ||
-              existing.status === "error")
-          ) {
-            dlBtn.setAttribute("disabled", "")
-            if (dlLabel) dlLabel.textContent = t("series.download.resuming")
-            resumeDownload(existing.id)
-            return
-          }
-          try {
-            dlBtn.setAttribute("disabled", "")
-            if (dlLabel) dlLabel.textContent = t("detail.download.starting")
-            const epTitle =
-              (series?.name ? `${series.name} - ` : "") +
-              `S${currentSeason || "?"}E${ep.episode_num || "?"}` +
-              (ep.title ? ` - ${ep.title}` : "")
-            await startDownload({
-              url: epUrl,
-              title: epTitle,
-              ext: ep.container_extension || inferExt(epUrl, "mp4"),
-              source: {
-                kind: "episode",
-                playlistId: activePlaylistId,
-                id: ep.id,
-                seriesId: series?.id ?? null,
-                seriesName: series?.name || "",
-                season: ep.season ?? currentSeason ?? null,
-                episode: ep.episode_num ?? null,
-                logo: series?.logo || null,
-              },
-            })
-          } catch (err) {
-            log.error("Episode download failed:", err)
-            dlBtn.removeAttribute("disabled")
-            if (dlLabel) dlLabel.textContent = t("detail.download.failed")
-            dlBtn.title = String(err?.message || err)
-          }
-        })
-        row.appendChild(dlBtn)
+      } else {
+        dlLabel.textContent = t("detail.action.download")
+        dlBtn.title = t("detail.download.tooltipNoTauri")
       }
+      dlBtn.addEventListener("click", async (e) => {
+        e.stopPropagation()
+        if (!isDownloadable()) {
+          window.open(epUrl, "_blank", "noopener,noreferrer")
+          return
+        }
+        const existing = findDownloadByUrl(epUrl)
+        if (existing?.status === "downloading" || existing?.status === "queued") {
+          pauseDownload(existing.id)
+          return
+        }
+        if (
+          existing &&
+          (existing.status === "paused" ||
+            existing.status === "stalled" ||
+            existing.status === "error")
+        ) {
+          dlBtn.setAttribute("disabled", "")
+          if (dlLabel) dlLabel.textContent = t("series.download.resuming")
+          resumeDownload(existing.id)
+          return
+        }
+        try {
+          dlBtn.setAttribute("disabled", "")
+          if (dlLabel) dlLabel.textContent = t("detail.download.starting")
+          const epTitle =
+            (series?.name ? `${series.name} - ` : "") +
+            `S${currentSeason || "?"}E${ep.episode_num || "?"}` +
+            (ep.title ? ` - ${ep.title}` : "")
+          await startDownload({
+            url: epUrl,
+            title: epTitle,
+            ext: ep.container_extension || inferExt(epUrl, "mp4"),
+            source: {
+              kind: "episode",
+              playlistId: activePlaylistId,
+              id: ep.id,
+              seriesId: series?.id ?? null,
+              seriesName: series?.name || "",
+              season: ep.season ?? currentSeason ?? null,
+              episode: ep.episode_num ?? null,
+              logo: series?.logo || null,
+            },
+          })
+        } catch (err) {
+          log.error("Episode download failed:", err)
+          dlBtn.removeAttribute("disabled")
+          if (dlLabel) dlLabel.textContent = t("detail.download.failed")
+          dlBtn.title = String(err?.message || err)
+        }
+      })
+      row.appendChild(dlBtn)
     }
 
     episodeList.appendChild(row)

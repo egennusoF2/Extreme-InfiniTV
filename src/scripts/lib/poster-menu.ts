@@ -18,6 +18,7 @@ import {
   isOnWatchlist,
   toggleWatchlist,
 } from "@/scripts/lib/preferences.js"
+import { isDownloadable } from "@/scripts/lib/downloads.js"
 
 export type PosterMenuKind = "vod" | "series"
 
@@ -140,7 +141,14 @@ export function openPosterMenu(opts: PosterMenuOptions): void {
   // VOD-only items
   if (kind === "vod") {
     if (opts.onDownload) {
-      menu.appendChild(makeItem(t("list.menu.download"), () => opts.onDownload!()))
+      menu.appendChild(
+        makeItem(
+          isDownloadable()
+            ? t("list.menu.download")
+            : t("detail.action.download"),
+          () => opts.onDownload!(),
+        ),
+      )
     }
     if (opts.buildStreamUrl) {
       menu.appendChild(

@@ -7,10 +7,17 @@ function isTauriRuntime() {
 }
 
 export async function injectVersion() {
-    if (!isTauriRuntime()) return
     const target = document.getElementById('app-version')
     if (!target) return
+    if (!isTauriRuntime()) {
+        target.hidden = true
+        target.textContent = ''
+        target.setAttribute('aria-hidden', 'true')
+        return
+    }
     try {
+        target.hidden = false
+        target.removeAttribute('aria-hidden')
         const { getVersion, getName } = await import('@tauri-apps/api/app')
         const version = await getVersion()
         const name = await getName()

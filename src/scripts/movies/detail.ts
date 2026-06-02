@@ -668,14 +668,18 @@ function findMovieDownload() {
 
 function applyDownloadState() {
   if (!downloadBtn) return
-  if (isDownloadable()) downloadBtn.removeAttribute("hidden")
+  downloadBtn.removeAttribute("hidden")
+  if (!isDownloadable()) {
+    downloadBtn.removeAttribute("disabled")
+    if (downloadLabel) downloadLabel.textContent = t("detail.action.download")
+    downloadBtn.title = t("detail.download.tooltipNoTauri")
+    return
+  }
   const d = findMovieDownload()
   downloadBtn.removeAttribute("disabled")
   if (!d) {
     if (downloadLabel) downloadLabel.textContent = t("detail.action.download")
-    downloadBtn.title = isDownloadable()
-      ? t("detail.download.tooltip")
-      : t("detail.download.tooltipNoTauri")
+    downloadBtn.title = t("detail.download.tooltip")
     return
   }
   switch (d.status) {
